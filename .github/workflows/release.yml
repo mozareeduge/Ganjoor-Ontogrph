@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Convert JSON → Markdown corpus
+        run: python3 src/ganjoor2md.py --input . --output md --jobs 4
+
+      # Enrichment is optional in CI: runs only when the OPENAI_API_KEY secret
+      # is configured (any OpenAI-compatible provider; see AGENTS.md). Without
+      # it the release ships the full Persian corpus (poems + خلاصه mirrors),
+      # and English summaries can be added locally via src/enrich.py.
+      - name: Enrich English summaries (if OPENAI_API_KEY secret set)
+        if: env.OPENAI_API_KEY != ''
+        env:
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ENRICH_MODEL: ${{ vars.ENRICH_MODEL || 'deepseek-v4-flash' }}
+        run: python3 src/enrich.py --md md --workers 8
+
+      - name: Package the Markdown corpus
+        run: |
+          tar -czf ganjoor-md-${{ github.ref_name }}.tar.gz -C md .
+          ls -lh ganjoor-md-${{ github.ref_name }}.tar.gz
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          NOTES="Agent-ready Markdown corpus built from ganjoor-data.
+          Full Persian corpus: poems, poet bios, category indexes (md/poets).
+          Persian kholase mirrors (md/summaries-fa).
+          English semantic summaries (md/summaries-en) - present when enrichment ran.
+          Setup: download the archive, then QMD_TRUST_LOCAL_CONFIG=1 qmd update && qmd embed (see AGENTS.md)."
+          gh release create "${{ github.ref_name }}" \
+            "ganjoor-md-${{ github.ref_name }}.tar.gz" \
+            --title "ganjoor-md ${{ github.ref_name }}" \
+            --notes "$NOTES"
