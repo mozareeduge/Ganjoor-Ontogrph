@@ -24,22 +24,34 @@ as raw JSON with Persian summaries. This project:
 
 ## Quickstart
 
+The corpus ships as a GitHub **Release artifact** (Markdown only — you build
+the local vector index yourself, per machine).
+
 ```bash
 npm install -g @tobilu/qmd
 
-# Full pipeline: convert → enrich (English summaries) → index
-OPENAI_API_KEY=sk-... ./scripts/build.sh
-# No API key? Conversion + indexing still work — only English semantic search is skipped.
+# 1. Get the code
+git clone https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin.git
+cd persian-poetry-ai-agent-plugin
 
-# Search
+# 2. Get the Markdown corpus (from Releases), or build it: python3 src/ganjoor2md.py --input . --output md
+tar -xzf ganjoor-md-v0.1.0.tar.gz -C md
+
+# 3. Build the local search index (isolated, project-local)
+export QMD_TRUST_LOCAL_CONFIG=1
+qmd update && qmd embed
+
+# 4. Search — English semantic, Persian semantic, Persian exact
 qmd query "poems about the pain of separation at night" -c ganjoor-en
+qmd query "شعرهایی درباره غم و گذر عمر" -c ganjoor-fa
 qmd search "که عشق آسان نمود اول ولی افتاد مشکل ها" -c ganjoor
+
+# 5. Expose it to agents via MCP
+./scripts/mcp-server.sh --daemon   # http://localhost:8191/mcp
 ```
 
-**Pluggable LLM.** Enrichment is provider-agnostic: `OPENAI_BASE_URL`,
-`OPENAI_API_KEY`, and `ENRICH_MODEL` (default `deepseek-v4-flash`) work with
-any OpenAI-compatible endpoint — DeepSeek, OpenAI, or a local server
-(LM Studio / Ollama / vLLM). See [AGENTS.md](AGENTS.md) for the full table.
+Full step-by-step instructions, the pluggable LLM table, and the agent playbook
+live in [AGENTS.md](AGENTS.md).
 
 ## Architecture
 
