@@ -46,6 +46,17 @@ anything.
 
 Requires [QMD](https://github.com/tobi/qmd) (`npm install -g @tobilu/qmd`).
 
+### Option A — MCP server (agents with MCP clients)
+
+```bash
+./scripts/mcp-server.sh --daemon     # http://localhost:8191/mcp
+```
+
+The server exposes the corpus over MCP tools (search/query/status/get) with
+`collection` scoping. Any MCP-capable agent can query the poetry index directly.
+
+### Option B — CLI
+
 ```bash
 # 0. Build the Markdown corpus + index (convert; enrichment optional — see below)
 ./scripts/build.sh
