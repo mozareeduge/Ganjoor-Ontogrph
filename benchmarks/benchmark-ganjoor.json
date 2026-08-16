@@ -1,0 +1,28 @@
+{
+  "description": "Persian exact-line retrieval quality — collection ganjoor (full poems, BM25)",
+  "version": 1,
+  "collection": "ganjoor",
+  "queries": [
+    {
+      "id": "fa-exact-gham-makhor",
+      "query": "یوسف گم گشته بازآید به کنعان، غم مخور",
+      "type": "exact",
+      "expected_files": ["hafez/ghazal/sh255.md"],
+      "expected_in_top_k": 3
+    },
+    {
+      "id": "fa-exact-eshq-asan",
+      "query": "که عشق آسان نمود اول ولی افتاد مشکل ها",
+      "type": "exact",
+      "expected_files": ["hafez/ghazal/sh1.md"],
+      "expected_in_top_k": 3
+    },
+    {
+      "id": "fa-exact-mozhdeh",
+      "query": "رسید مژده که ایام غم نخواهد ماند",
+      "type": "exact",
+      "expected_files": ["hafez/ghazal/sh179.md"],
+      "expected_in_top_k": 3
+    }
+  ]
+}

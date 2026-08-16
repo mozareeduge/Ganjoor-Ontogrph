@@ -1,0 +1,49 @@
+{
+  "description": "English semantic retrieval quality — collection ganjoor-en (English summaries)",
+  "version": 1,
+  "collection": "ganjoor-en",
+  "queries": [
+    {
+      "id": "en-separation-night",
+      "query": "poems about the pain of separation from the beloved at night",
+      "type": "semantic",
+      "expected_files": ["hafez/montasab/sh31.md", "hafez/ghazal/sh82.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "en-living-for-god",
+      "query": "living for God not for people, sincere devotion without showing off",
+      "type": "semantic",
+      "expected_files": ["hafez/ghazal/sh227.md", "hafez/ghazal/sh434.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "en-wine-cupbearer",
+      "query": "wine and the cupbearer, seizing the moment",
+      "type": "semantic",
+      "expected_files": ["hafez/ghazal/sh396.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "en-impermanence",
+      "query": "the impermanence of life and the fleeting nature of joy",
+      "type": "semantic",
+      "expected_files": ["hafez/ghazal/sh462.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "en-grief-loss",
+      "query": "grief and loss",
+      "type": "semantic",
+      "expected_files": ["hafez/ghete/sh5.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "en-bm25-wine",
+      "query": "wine cupbearer",
+      "type": "exact",
+      "expected_files": ["hafez/montasab/sh103.md"],
+      "expected_in_top_k": 5
+    }
+  ]
+}

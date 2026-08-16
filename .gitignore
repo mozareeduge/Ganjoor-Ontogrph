@@ -1,0 +1,14 @@
+# Generated content (build artifacts — never commit)
+md/
+
+# Python
+__pycache__/
+*.pyc
+
+# QMD local index — machine-specific, rebuilt with `qmd update` + `qmd embed`
+.qmd/index.sqlite
+.qmd/*.sqlite*
+.qmd/.cache/
+
+# OS junk
+.DS_Store

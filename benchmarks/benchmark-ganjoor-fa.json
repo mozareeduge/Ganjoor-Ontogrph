@@ -1,0 +1,42 @@
+{
+  "description": "Persian semantic retrieval quality — collection ganjoor-fa (Persian خلاصه summaries)",
+  "version": 1,
+  "collection": "ganjoor-fa",
+  "queries": [
+    {
+      "id": "fa-gham-faraq",
+      "query": "غم و اندوه و فراق",
+      "type": "semantic",
+      "expected_files": ["hafez/montasab/sh34.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "fa-deltangi-shab",
+      "query": "شعرهایی درباره دلتنگی و شب",
+      "type": "semantic",
+      "expected_files": ["hafez/ghazal/sh262.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "fa-riya-khoda",
+      "query": "ریا نکردن و برای خدا زیستن نه برای خلق و مردم",
+      "type": "semantic",
+      "expected_files": ["hafez/ghazal/sh202.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "fa-mey-saghi",
+      "query": "می و ساقی و شادی و طرب",
+      "type": "semantic",
+      "expected_files": ["hafez/ghazal/sh256.md"],
+      "expected_in_top_k": 5
+    },
+    {
+      "id": "fa-bahar-gol",
+      "query": "بهار و گل و بلبل و باغ",
+      "type": "semantic",
+      "expected_files": ["hafez/ghazal/sh239.md"],
+      "expected_in_top_k": 5
+    }
+  ]
+}

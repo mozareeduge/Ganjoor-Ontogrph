@@ -1,0 +1,26 @@
+# Project-local QMD index for persian-poetry-ai-agent-plugin.
+# Checked in on purpose: any agent clones the repo, runs
+# `QMD_TRUST_LOCAL_CONFIG=1 qmd update && qmd embed`, and gets a fully
+# isolated, multilingual search index. Never touches the global QMD index.
+
+collections:
+  ganjoor:
+    path: ./md/poets
+    pattern: "**/*.md"
+    context:
+      "": "Full Ganjoor Persian poetry corpus: poems, poet bios, category indexes. Persian exact-line search (BM25) and Persian semantic search."
+  ganjoor-en:
+    path: ./md/summaries-en
+    pattern: "**/*.md"
+    context:
+      "": "English semantic summaries of Ganjoor poems. Each file's frontmatter carries a 'poem' pointer (relative path) to the full Persian poem in the ganjoor collection."
+  ganjoor-fa:
+    path: ./md/summaries-fa
+    pattern: "**/*.md"
+    context:
+      "": "Persian خلاصه (Ganjoor AI summary) of each poem. Each file's frontmatter carries a 'poem' pointer to the full poem in the ganjoor collection. Persian semantic search on summaries only."
+
+models:
+  embed: hf:Qwen/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf
+  generate: hf:tobil/qmd-query-expansion-1.7B-gguf/qmd-query-expansion-1.7B-q4_k_m.gguf
+  rerank: hf:ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF/qwen3-reranker-0.6b-q8_0.gguf
