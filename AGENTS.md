@@ -95,14 +95,45 @@ qmd search "که عشق آسان نمود اول ولی افتاد مشکل ها
 qmd query "شعرهایی درباره غم و گذر عمر" -c ganjoor-fa
 ```
 
-### Step 4 — Expose it to agents (optional but recommended)
+### Step 4 — Expose it to agents via MCP
 
 ```bash
 ./scripts/mcp-server.sh --daemon    # http://localhost:8191/mcp
 ```
 
-Any MCP-capable agent can now query the corpus with tools (search/query/status/get)
-with `collection` scoping. Stop it with `./scripts/mcp-server.sh stop`.
+Any MCP-capable agent can query the corpus. Stop it with `./scripts/mcp-server.sh stop`.
+
+**Protocol notes (verified 2026-08-16 against QMD 2.5.3):**
+
+- The server speaks MCP **2025-11-25 (session-based HTTP)**. After `initialize`,
+  capture the `mcp-session-id` **response header** and send it back as the
+  `Mcp-Session-Id` header on every later request, then send
+  `notifications/initialized`.
+- Tool surface: **`query`**, **`get`**, **`multi_get`**, **`status`**.
+  (There is no `search` tool — hybrid search lives in `query`.)
+
+**`query` tool** — typed searches (each item is `{type: "lex"|"vec"|"hyde", query}`),
+`collections` is a plural array, plus `limit`, `minScore`, `candidateLimit`,
+`intent`, `rerank`:
+
+```json
+// Persian exact line (lex)
+{"searches": [{"type": "lex", "query": "یوسف گم گشته بازآید به کنعان، غم مخور"}],
+ "collections": ["ganjoor"], "limit": 5}
+
+// English semantic (vec)
+{"searches": [{"type": "vec", "query": "poems about the pain of separation at night"}],
+ "collections": ["ganjoor-en"], "limit": 5}
+
+// Persian semantic (vec)
+{"searches": [{"type": "vec", "query": "شعرهایی درباره غم و گذر عمر"}],
+ "collections": ["ganjoor-fa"], "limit": 5}
+```
+
+**`get` tool** — fetch a document by docid (`#e339c3`) or `qmd://` path
+(`qmd://ganjoor/hafez/ghazal/sh255.md`); content comes back as a `resource`
+item with `text/markdown`. Follow the summary's `poem:` pointer to the full
+poem and answer from it — never from snippets alone.
 
 ### English enrichment — pluggable LLM (optional, for English semantic search)
 
