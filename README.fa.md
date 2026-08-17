@@ -14,13 +14,12 @@ Markdown قابل جستجو تبدیل می‌کند؛ چندزبانه، آف�
 
 *به agent هوش مصنوعی‌ات — به فارسی — می‌گویی دلت برای کسی که دوستش داری تنگ شده. او در میان هفتصد سال شعر فارسی می‌گردد و با همان شعری که به حالِ تو می‌خورد جواب می‌دهد.*
 
-<video src="https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/raw/main/docs/assets/demo.mp4" poster="docs/assets/demo-poster.jpg" controls width="100%"></video>
+https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4
 
 > یک گفت‌وگوی واقعی با MCP server: یک پیام فارسی دربارهٔ دوری از یار ← جستجوی
 > معنایی در میان حدود ۱۳۲٬۵۰۰ شعر ←
 > [فخرالدین عراقی، غزل ۱۰۶](https://ganjoor.net/eraghi/divane/ghazale/sh106).
-> ‏۳۰ ثانیه. تماماً فارسی، تماماً محلی. (اگر پخش‌کننده بالا کار نکرد،
-> [ویدیو را دانلود کنید](docs/assets/demo.mp4).)
+> ‏۳۰ ثانیه. تماماً فارسی، تماماً محلی.
 
 ## چرا؟
 
