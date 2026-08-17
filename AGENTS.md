@@ -81,8 +81,13 @@ The index is project-local and isolated (`.qmd/index.yml` is checked in):
 ```bash
 export QMD_TRUST_LOCAL_CONFIG=1   # allow the checked-in config + custom models
 qmd update                        # index the Markdown files (BM25 + metadata)
-qmd embed                         # generate vector embeddings (Qwen3-Embedding, multilingual)
+qmd embed -c ganjoor-fa           # Persian semantic vectors (خلاصه collection)
+qmd embed -c ganjoor-en           # English semantic vectors (summary collection)
 ```
+
+Embedding is scoped to the summary collections **by design** — the `ganjoor`
+collection (full poems) is BM25-only and never embedded. The first `qmd embed`
+downloads the multilingual Qwen3-Embedding model (~640 MB).
 
 `qmd update` is fast. `qmd embed` takes minutes to hours depending on your
 hardware — it runs locally and is resumable.
@@ -219,7 +224,12 @@ qmd query $'intent: Find ghazals about the pain of separation at night, not poem
 ## 7. Status
 
 - [x] Data verified (234 poets / ~132.5K poems, 2.3 GB)
-- [x] QMD integration proven (two-collection architecture, multilingual embedder)
-- [x] Converter `src/ganjoor2md.py` (JSON → MD) — Hafez pilot verified
-- [x] Enrichment `src/enrich.py` (English summaries via OpenAI-compatible API) — Hafez pilot verified
-- [ ] Full corpus build + Release pipeline (in progress)
+- [x] QMD integration proven (three-collection architecture, multilingual embedder)
+- [x] Converter `src/ganjoor2md.py` (JSON → MD) — full corpus, 0 errors
+- [x] Enrichment `src/enrich.py` (English summaries via OpenAI-compatible API) — pluggable
+- [x] **v0.1.0 released** — corpus artifact `ganjoor-md-v0.1.0.tar.gz`
+      (Persian-complete: poems, bios, categories, خلاصه mirrors)
+- [x] MCP server (`scripts/mcp-server.sh`) + `persian-poetry-mcp` skill + Makefile
+- [ ] English semantic summaries: free crawl in progress → **v0.2.0** adds
+      `summaries-en` to the release artifact
+- [ ] Non-technical presentation (Ganjoor founder offered to promote it)

@@ -43,7 +43,10 @@ echo
 echo "== Stage 3: project-local QMD index =="
 export QMD_TRUST_LOCAL_CONFIG=1
 qmd update
-qmd embed
+# Embed ONLY the summary collections. The `ganjoor` collection (full poems) is
+# intentionally BM25-only — embedding it wastes hours for nothing.
+qmd embed -c ganjoor-fa
+qmd embed -c ganjoor-en
 
 echo
 echo "Done. Try:"
