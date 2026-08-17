@@ -76,6 +76,9 @@ document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'E
 
 HAS_PERSIAN = re.compile(r"[\u0600-\u06FF]")
 
+# QMD collection name → directory under md/
+COLL_DIR = {"ganjoor": "poets", "ganjoor-fa": "summaries-fa", "ganjoor-en": "summaries-en"}
+
 
 def run_qmd(args):
     try:
@@ -107,11 +110,17 @@ def title_of(md_path):
 
 def parse_hits(out, coll, limit=5):
     hits = []
-    for m in re.finditer(r"qmd://([^\s#]+\.md)[^\n]*\nScore:\s+(\d+)%", out):
-        rel = m.group(1)
-        score = int(m.group(2))
-        rel = rel.replace(f"{coll}/", "", 1) if rel.startswith(f"{coll}/") else rel
-        md_path = Path("md") / coll / rel
+    cur = None
+    for line in out.splitlines():
+        m = re.search(r"qmd://([^\s#]+\.md)", line)
+        if m:
+            cur = m.group(1)
+            continue
+        s = re.search(r"Score:\s+(\d+)%", line)
+        if not (s and cur):
+            continue
+        rel = cur.replace(f"{coll}/", "", 1) if cur.startswith(f"{coll}/") else cur
+        md_path = Path("md") / COLL_DIR.get(coll, coll) / rel
         if coll in ("ganjoor-fa", "ganjoor-en"):
             # follow the poem: pointer
             try:
@@ -120,15 +129,18 @@ def parse_hits(out, coll, limit=5):
                 if pm:
                     md_path = (ROOT / md_path).parent / pm.group(1).strip()
                 else:
+                    cur = None
                     continue
             except OSError:
+                cur = None
                 continue
         hits.append({
             "title": title_of(md_path),
-            "score": score,
+            "score": int(s.group(1)),
             "poem": first_couplets(md_path),
             "url": "",
         })
+        cur = None
         if len(hits) >= limit:
             break
     return hits
