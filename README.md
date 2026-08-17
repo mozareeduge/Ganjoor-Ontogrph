@@ -14,12 +14,9 @@ Persian semantic + Persian exact-line search, all local).
 
 *You tell your AI agent — in Persian — that you miss someone you love. It reaches into 700 years of Persian poetry and answers with the poem that meets you there.*
 
-https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4
+[![Watch the demo — a real exchange with the MCP server](docs/assets/demo-poster.jpg)](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)
 
-> A real exchange with the MCP server: a Persian message about missing a beloved →
-> semantic search over ~132,500 poems →
-> [Fakhr al-Din Iraqi, Ghazal 106](https://ganjoor.net/eraghi/divane/ghazale/sh106).
-> 30s. Pure Persian, fully local.
+**[▶ Watch the demo video](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — a real exchange with the MCP server: a Persian message about missing a beloved → semantic search over ~132,500 poems → [Fakhr al-Din Iraqi, Ghazal 106](https://ganjoor.net/eraghi/divane/ghazale/sh106). 30s. Pure Persian, fully local.
 
 ## Why
 
