@@ -2,5 +2,7 @@
   "Id": 9001,
   "Name": "شاعر آزمایشی یک",
   "Nickname": "آزمایشی۱",
-  "Description": "Fabricated fixture poet, not a real historical figure."
+  "Description": "Fabricated fixture poet, not a real historical figure.",
+  "BirthYearLunarHijri": 705,
+  "DeathYearLunarHijri": 780
 }
