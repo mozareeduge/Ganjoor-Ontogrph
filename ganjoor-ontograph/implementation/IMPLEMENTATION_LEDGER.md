@@ -1,0 +1,111 @@
+# Implementation ledger
+
+The single source of truth for "what's next." One `/ontograph-build`
+iteration = find the first row with `Status: todo` (rows are already in
+dependency order — do not skip ahead even if a later row looks easier),
+implement it, run its Verify command, flip it to `done` only if Verify
+passes, commit+push, stop. See
+`../../.claude/skills/ontograph-build/SKILL.md` for the exact algorithm and
+`BUILD_PLAN.md` for the phase rationale.
+
+Never edit a `done` row's Verify command to make it pass — if a later task
+reveals an earlier row's Verify was wrong or insufficient, add a new row
+noting the correction; don't rewrite history silently.
+
+Status values: `todo` · `in-progress` · `done` · `blocked` (with a Notes
+entry explaining the blocker — never leave a row `blocked` silently).
+
+## Phase 0 — Bootstrap and ground truth
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P0.1 | Fixture corpus + ground-truth test | §67 | `pytest fixtures/mini-ganjoor/test_fixture_ground_truth.py -q` | done | Rebuilt after external review (EXTERNAL_REVIEW.md, Findings 1–3): 4 poets, 27 poems, anchor/token-aware/assessed levels now distinguished; 7/7 pass. |
+| P0.2 | `pyproject.toml` + `src/ontograph/` package skeleton (empty modules: corpus, normalize, field, anchors, census, encounters, metrics, compare, ablation, mediation, workspace, release, validate — each with a module docstring citing its spec section, no logic yet) | §59 | `python -c "import ontograph"` succeeds after `pip install -e .` | todo | |
+| P0.3 | Pin dependencies (stdlib + PyYAML only, unless a task below needs more — do not add a dependency the spec doesn't require) | §59 | `pip install -e .` succeeds from a clean venv | todo | Depends on P0.2. |
+| P0.4 | `CorpusSnapshot` loader: reads a `manifest.json` root, records commit/path + manifest hash, exposes poet/poem counts | §56, §65 | unit test loads `fixtures/mini-ganjoor/manifest.json` and asserts `PoetsCount==4`, `PoemsCount==27` | todo | Depends on P0.2. |
+| P0.5 | Real-schema spot check: confirm `VOrder`/`Position`/`CoupletIndex`/`SectionIndex1` semantics against a real ghazal AND a real epic-format poem | §21, §58 | inspect `poets/hafez/ghazal/sh1.json` (this repo's own root, now that it's a fork of the vendored corpus — no fetch needed) and `poets/ferdousi/shahname/12rokh/sh13.json` | **done** | **Real discrepancy found, not just confirmed clean.** The ghazal matches every fixture assumption exactly (1 Section, `SectionType: WholePoem`, `CoupletIndex`/`Position` as modeled). The epic poem does NOT: it has 116 `Sections` — one `SectionType: WholePoem` (`Index: 0`, `CoupletsCount: 115`, spanning the whole poem) PLUS 115 individual `SectionType: Couplet` entries (`Index: 2..116`, `CoupletsCount: 1` each, `Index: 1` inexplicably absent) — yet **every one of the 230 Verses still carries `SectionIndex1: 0`, uniformly**, regardless of which per-couplet Section it structurally belongs to. So `SectionIndex1` cannot distinguish per-couplet sections in epic-format poems at all; only `CoupletIndex` still works reliably. **Consequence for P1.3/P1.6/P3.6**: section-scale operations (§24) must not assume `SectionIndex1` identifies "the section a verse is in" for every `PoemFormat` — for epic/multi-section poems it identifies only the outer `WholePoem` section, and per-couplet Section records must be correlated via `CoupletIndex` (or ignored) instead. This is exactly the "structurally exceptional records are not silently forced into couplet logic" case §24 already warns about (see the fork's own `persian-poetry-mcp` skill notes on "epic poems... live in large section files" — the same warning, now confirmed at the field level). The mini-ganjoor fixture (all poems single-`WholePoem`-section) does not exercise this and should not be extended to fake it — real-corpus-only edge case, revisit in Phase 8 rather than adding a synthetic epic-format fixture poem on spec. |
+
+## Phase 1 — Deterministic core
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P1.1 | Persian normalization pipeline: Yeh/Kaf variants, Unicode NFC, ZWNJ policy, optional diacritic strip, whitespace — versioned, original text+offsets preserved | §58 | round-trip test: normalize then map offsets back to original text on 5 hand-picked fixture verses, exact match | todo | |
+| P1.2 | Token boundary definition for token-window scale (ZWNJ/half-space, punctuation, clitics) | §58 | unit test on poem 9107 (`آینه‌بند`, ZWNJ-joined compound) asserting the tokenizer treats it as ONE token distinct from `آینه` | todo | Depends on P1.1. Verify command is now concrete (poem 9107 exists specifically for this — added per Finding 3 of the external review, replacing the earlier "flag if the fixture has no such case" placeholder). |
+| P1.3 | `FieldCharter` + `ScopeSpec`: native filters (poet/category/poem/format/metre/rhyme/source), union/intersection/difference | §7, §23, §48 | build a field over `sample1 ∪ sample2` and assert poem count == 12; build `all minus sample3` and assert == 22 | todo | Depends on P0.4. Counts updated for the 4-poet/27-poem fixture (sample1=7, sample2=5, sample3=5, sample4=10). |
+| P1.4 | Derived fraction support: poet-life chronological proxy construction (rule stored with the field, never presented as a poem date) | §11, §23.2 | field built with a proxy rule shows `derived: true` and the exact rule string in its charter | todo | Fixture poets have no birth/death years yet — add minimal fake ones to `poet.json` fixtures rather than skip. |
+| P1.5 | `LexicalAnchor` + exact `AnchorHit` census against a field | §8, §27.1 | census for anchor `آینه`+`آیینه` over the full fixture field returns exactly **7** hits (`token_aware_level` in ground truth), across poems `[9101,9102,9103,9104,9105,9106,9201]` — poem **9107 must NOT appear** | todo | Depends on P1.1 (specifically P1.2's tokenizer), P1.3. This is the first real cross-check against P0.1's ground truth. A census returning 8 (including 9107) means the tokenizer isn't wired in yet or is falling back to substring matching — that is an engine bug, not a fixture bug, and this row does not pass until it returns exactly 7. |
+| P1.6 | SQLite derived research index (poets/categories/poems/sections/verses/couplets/normalized_verses/token_offsets) + manifest linking rows to source addresses | §57 | rebuild index from fixture, assert row counts match manifest counts exactly | todo | Depends on P1.1, P1.3. |
+| P1.7 | Workspace-as-git-repo: `ontograph study new` initializes `ontograph-workspaces/<id>/` as its own git repo | §60 | after `study new`, `git -C <workspace> rev-parse HEAD` succeeds | todo | |
+
+## Phase 2 — Calibration and occurrence assessment
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P2.1 | Close Calibration sampler: stratified/random sample over Anchor Hits, seeded, context-ladder opening | §9 | seeded sample of size 5 over the 7 fixture mirror hits (token-aware level) is reproducible across two runs with the same seed | todo | Depends on P1.5. |
+| P2.2 | `OccurrenceAssessment` + `OccurrencePolicy` records for BOTH mirror and rust; modes `anchor`/`assessed-full`/`assessed-rule`/`estimated` | §8.1, §49 | load `canonical-study-assessments.json` and apply it: mirror `assessed-full` census reports 5 accepted / 1 ambiguous / 1 rejected; rust `assessed-full` census reports 4 accepted / 0 / 0 | todo | Depends on P2.1. **Rewritten per Finding 1 of the external review** — the original version of this row only assessed mirror, which let every downstream relation test (P3.3/P3.6/P3.8) pass on raw anchors instead of assessed occurrences. Both objects must be assessed before Phase 3 starts. |
+| P2.3 | Ambiguous-hit denominator rule | §8.1.1 (v2.3.0) | prevalence under `assessed-full` on the fixture reports denominator 27 (not 26), numerator 5 (not 7), plus "1 unit with only ambiguous hits" (poem 9105) shown separately — matches `assessed_level.mirror_prevalence_poem_scale` ("5/27") in ground truth | todo | Depends on P2.2. This is a v2.3.0 addition with no prior art to copy — write the test from the spec text directly. |
+| P2.4 | Default estimator: stratified proportion + Wilson score interval (+ finite-population correction above 10% sampling fraction) | §27.2, Appendix C.3 (v2.3.0) | on the **HEART object** (41 field-wide hits — see `heart_object` in ground truth, not the 7-hit mirror object), draw a seeded sample at a genuine ~50% sampling fraction (e.g. 20 of 41 hits), compute the Wilson interval, and assert the interval brackets the true prevalence (11/27 poems); repeat across ≥5 seeds and assert the interval brackets truth in ≥90% of runs | todo | Depends on P2.2. **Rewritten per Finding 2 of the external review** — the original version tested at 100% sampling fraction, which is a tautology (a census equals itself under any estimator) and exercises neither the Wilson interval nor the finite-population correction. This is why the HEART object (P0.1) exists. |
+
+## Phase 3 — Metrics and mapping operations
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P3.1 | Unit incidence, prevalence, spread, concentration | §27.3–27.6 | on fixture, prevalence(mirror, poem-scale, assessed-full) == 5/27 (per P2.3's corrected denominator); top-poet share reported alongside | todo | Depends on P2.3. |
+| P3.2 | Dispersion (named, versioned Gries DP-family measure) shown only with raw counts + partition sizes | §27.7 | dispersion value never rendered without both raw counts in the same result object | todo | Depends on P3.1. |
+| P3.3 | Typed co-incidence matrix (`AᵀA` from occurrence policy, not raw anchors) + separate `A_anchor` | §28.1 | on fixture: `A_anchor` (anchor-level) poem-scale mirror×rust co-incidence == **4**, couplet-scale == **3** (both include poem 9106). The assessed matrix (from `OccurrencePolicy`, per P2.2) poem-scale == **3**, couplet-scale == **2** (9106 excluded because its mirror hit is rejected). **Both numbers must be asserted, and they must differ** — a test that only checks one matrix cannot catch an engine that silently builds co-incidence from raw anchors instead of assessed occurrences. | todo | Depends on P2.2, P1.6. **Rewritten per Finding 1 of the external review** (see `manifest.json`'s `anchor_level` vs `assessed_level` blocks and `divergence_note`) — the original version's single target (3/2) was identical whether the engine was correct or not. |
+| P3.4 | Conditional association P(B\|A), P(A\|B) — labelled "conditional association," never causation | §28.2 | unit test asserts the two directions differ on the fixture and neither output string contains "cause" | todo | Depends on P3.3. |
+| P3.5 | Lift with minimum-support guard; never called "statistical significance" without a declared reference condition | §28.3 | lift computation refuses (raises/labels) below the configured minimum support | todo | Depends on P3.3. |
+| P3.6 | Relation Scale Profile / `ScaleSurvival` across poem→section→couplet→verse→token-window | §29 | on fixture, **assessed-level** mirror-rust scale profile shows poem-scale 3, couplet-scale 2, correctly isolates 9102 as the poem that only survives broadly (poem-scale yes, couplet-scale no), AND correctly excludes 9106 from the couplet-scale count (present at poem/anchor scale, absent once occurrence assessment is applied) | todo | Depends on P3.3, P1.2. Poem 9106 addition (Finding 1) makes this row test the assessed-vs-anchor distinction at every scale rung, not just poem/couplet totals. |
+| P3.7 | Compare Fields (raw incidence, prevalence, dispersion/concentration deltas, companions gained/lost, close-reading cases behind the biggest difference) | §30 | compare `sample1`-field vs `sample2`-field; assert the report includes raw support alongside any ratio | todo | Depends on P3.1, P3.3. |
+| P3.8 | Ablation + `AblationRetention` | §31 | removing `sample1` (poems 9101–9107) from the full fixture field: **assessed** couplet-scale mirror-rust co-incidence drops from 2 to 1 (50% retention); **anchor-level** couplet-scale drops from 3 to 1 (33% retention). Both ratios must be computed and must differ — must match `manifest.json`'s `ablation_remove_sample1` block exactly | todo | Depends on P3.3. This is the Test D fixture case (§67) — the whole point of the `sample2` minority tight case. Anchor-vs-assessed split added per Finding 1 of the external review. |
+| P3.9 | Invariant audit — re-run the full Appendix A non-equivalence list as live assertions against the assembled engine (anchor≠object, co-incidence≠relation, estimate≠census, high frequency≠wide dispersion, etc.), using the fixture as the corpus under test | Appendix A | a dedicated `tests/invariants/test_appendix_a.py` passes, covering at minimum: anchor hit count (P1.5, 7) ≠ mirror-rust co-incidence numerator; `estimated`-mode HEART prevalence is never labelled "exact"; ablation retention is never phrased as an explanation ("caused by") | todo | Added per Finding 4 of the external review: a single ledger row's "spec wins, flag don't pick" discipline fires per-row and never looks at the assembled engine as a whole. Re-run this row's test again at the end of Phase 7 (as part of P7.4) before declaring the gates green, not just once here. |
+
+## Phase 4 — Records, events, release
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P4.1 | Trace, Relation-Object, Profile, Experiment, Finding record CRUD (JSONL-backed, per workspace schema) | §49–55 | round-trip write/read for one instance of each record type | todo | Depends on P1.7. **Scope note per Finding 5 of the external review**: this row is Trace/Relation-Object/Profile/Experiment/Finding only — do NOT build Fourfold Diagnostic or Bridge Record CRUD here. The spec's own §12/§73 restraint ("fourfold only when load-bearing," experimental reserve) applies to the build too: those two record types are deferred out of v0.1 until an actual Research Situation demands one, not built on spec now. |
+| P4.2 | AI-summary Profile provenance fields (`summarizer_model_version`, `summarizer_prompt_version`) required when `access_apparatus=ai-summary` | §40, §52 (v2.3.0) | creating an ai-summary Profile without these fields raises/rejects | todo | Depends on P4.1. |
+| P4.3 | Append-only `EventRecord` log | §51 | attempting to mutate/delete a past event raises; replay reconstructs a sequence of study states | todo | Depends on P4.1. |
+| P4.4 | `ResearchRelease` generator incl. `data_license_notice` | §55, §56 (v2.3.0) | release refuses to generate if `data_license_notice` is empty; generated release for the fixture study contains the three-part licensing chain text verbatim | todo | Depends on P4.1, P4.3. |
+| P4.5 | Release-as-git-tag convention | §60 (v2.3.0) | `ontograph release` creates a git tag in the study workspace matching the release version | todo | Depends on P1.7, P4.4. |
+
+## Phase 5 — CLI
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P5.1 | `ontograph` console script wired to Phases 1–4, every verb accepts `--json` | §62, §78 | each of `study new`, `field build`, `object add`, `calibrate`, `census`, `map recurrence`, `companions`, `compare`, `ablate`, `release` runs against the fixture and exits 0 with well-formed JSON | todo | Depends on all of Phase 1–4. |
+| P5.2 | Verb-naming check: no `search`/`query` verbs anywhere in the CLI | §25 (v2.3.0 disambiguation note) | `ontograph --help` output contains neither literal string | todo | Depends on P5.1. |
+| P5.3 | Explicit failure mode: non-zero exit + stderr message on bad input, on missing workspace, on malformed field spec — never a silent empty JSON success | §61, §78 | one negative test per failure class above | todo | Depends on P5.1. |
+
+## Phase 6 — Claude Code binding
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P6.1 | Point `.claude/skills/persian-poetry-ontograph/SKILL.md`'s invocation examples at the real, now-working CLI (already scaffolded this session; update only the "Status: scaffold" note once Phase 5 is done) | Part XIII | manually run one invocation from the SKILL.md example block against the fixture, confirm the JSON shape matches | todo | Depends on P5.1. |
+| P6.2 | `.claude/settings.json` allowlist entries for corpus-mutating/release verbs per §79 | §79 | settings.json contains explicit entries for `field build`, `object add`, `calibrate`, `release`; no blanket Bash grant added | todo | |
+
+## Phase 7 — Tests and gates (v0.1 completion)
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P7.1 | Deterministic corpus test suite (full §65 list) | §65 | `pytest tests/deterministic/ -q` all pass | todo | Depends on Phases 1–3. |
+| P7.2 | Epistemic contract test suite (full §66 list — the "does NOT" scenarios) | §66 | `pytest tests/epistemic/ -q` all pass | todo | Depends on Phases 1–4. |
+| P7.3 | Close–distant loop tests A–F against the fixture | §67 | `pytest tests/loop/ -q` all pass; Test F may be `xfail`-marked with a comment pointing at §72 (mediation is v0.2 scope) rather than silently skipped | todo | Depends on Phases 1–4. |
+| P7.4 | Implementation gates 1–5 | §69 | a single `ontograph validate --gates --json` (or equivalent script) reports all five gates green against the fixture, AND re-runs P3.9's invariant audit as part of gate 3 (deterministic-engine gate) — a gate report that doesn't re-check Appendix A live does not count as green | todo | Depends on P7.1–P7.3. |
+| P7.5 | Occurrence-assessment scalability gate | §70 | the fixture study demonstrates all three routes on objects large enough to actually pressure them: `assessed-full` on mirror's 7 hits, `assessed-rule` with one versioned rule (validated against the mirror/rust divergence case, poem 9106, so the rule can be shown to correctly exclude it), and `estimated` on the **HEART object at a genuine <100% sampling fraction** (per P2.4) with its Wilson interval verified to bracket the true 11/27 prevalence — never mislabeling one route as another | todo | Depends on P2.2–P2.4. **Rewritten per Finding 2 of the external review** — testing `estimated` mode only at 100% sampling (the original version) is a tautology that never pressures the estimator; this row does not pass on that basis. |
+| P7.6 | End-to-end replay: run one full study (Field Charter → Release) on the fixture, then independently reconstruct its state from the release package alone | §69 gate 5 | a second script rebuilds study state from `release.json` only and asserts it matches the live workspace | todo | Depends on all prior phases. **This row passing is the v0.1 stop condition** — see `BUILD_PLAN.md` Definition of Done. Per Finding 2 of the external review, the stop condition is "gates passed on the fixture, including the now-genuinely-pressured §70 gate" — not a claim that real-corpus behavior (Phase 8) has been validated. |
+
+## Phase 8 — Real-corpus integration (manual, not loop-driven)
+
+| ID | Task | Spec refs | Verify | Status | Notes |
+|---|---|---|---|---|---|
+| P8.1 | Point pinned-corpus config at the real corpus (this repo's own root — `poets/`, `index/`, `manifest.json`, commit `500a82a55f90870f2214f39a8069182dbad4f183`), rebuild real SQLite index | §56 | poet/poem counts (234 poets, 132,591 poems) match `manifest.json` at repo root, which matches the live manifest re-audited in `EVALUATION.md` | manual | **Not part of the automated loop** — no clone needed here (the fork already vendors the corpus), but pointing the finished engine at ~132k real poems and sanity-checking the result is exploratory human review, not a mechanical gate. Do this yourself, or in a separately-approved session, after Phase 7 passes. |
+| P8.2 | Run the spec's own worked example (§45, mirror/rust in Hafez) as a smoke test on the real corpus | §45 | a human reviews the actual output against §45's narrative | manual | Depends on P8.1. |
+
+## Out of loop scope (do not add rows for these without a Research Situation justifying them — §73–74)
+
+Mediation/relation-mediated-thickness (v0.2, §72), multiplex graph
+diagnostics beyond bridge-diagnostic ablation, matrix decomposition,
+spectral/community diagnostics, any browser workbench, any graph database,
+corpus-wide LLM labeling, a universal Persian lemmatizer.

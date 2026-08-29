@@ -1,0 +1,72 @@
+{
+  "Id": 9102,
+  "CatId": 1,
+  "Title": "غزل آزمایشی ۱-۲",
+  "FullTitle": "غزل آزمایشی ۱-۲",
+  "FullUrl": "/fixture/9102",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Broad-only case: mirror and rust appear in the same poem but different couplets.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آینه به دیوار کهن آویزان / روزی روشن نشان می‌داد\nسال‌ها بگذشت و خاموش شد / دیگر پیدا نبود آن تابان\nدر پستوی خانه چیزی بود / زنگار به زیر زمین در انبان",
+      "HtmlText": "<div class='b'>آینه به دیوار کهن آویزان / روزی روشن نشان می‌داد\nسال‌ها بگذشت و خاموش شد / دیگر پیدا نبود آن تابان\nدر پستوی خانه چیزی بود / زنگار به زیر زمین در انبان</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 3
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آینه به دیوار کهن آویزان",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "روزی روشن نشان می‌داد",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 3,
+      "Position": "Right",
+      "Text": "سال‌ها بگذشت و خاموش شد",
+      "CoupletIndex": 1,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 4,
+      "Position": "Left",
+      "Text": "دیگر پیدا نبود آن تابان",
+      "CoupletIndex": 1,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 5,
+      "Position": "Right",
+      "Text": "در پستوی خانه چیزی بود",
+      "CoupletIndex": 2,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 6,
+      "Position": "Left",
+      "Text": "زنگار به زیر زمین در انبان",
+      "CoupletIndex": 2,
+      "SectionIndex1": 0
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "Id": 9305,
+  "CatId": 3,
+  "Title": "غزل آزمایشی ۳-5",
+  "FullTitle": "غزل آزمایشی ۳-5",
+  "FullUrl": "/fixture/9305",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Control poem, no anchors present (mirror, rust, or HEART), poet 3 has zero incidence of every tracked object.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "چشمه‌ای میان کوه / بی هیچ نشانی از این‌ها یافت نمی‌شود",
+      "HtmlText": "<div class='b'>چشمه‌ای میان کوه / بی هیچ نشانی از این‌ها یافت نمی‌شود</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "چشمه‌ای میان کوه",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "بی هیچ نشانی از این‌ها یافت نمی‌شود",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}
