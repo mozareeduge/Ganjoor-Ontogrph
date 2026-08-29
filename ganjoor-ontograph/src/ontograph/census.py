@@ -21,6 +21,7 @@ import random
 from dataclasses import dataclass, field as _dc_field
 
 from ontograph.anchors import AnchorHit
+from ontograph.normalize import tokenize
 
 
 # --- P2.1: Close Calibration sampler (spec §9) ---
@@ -144,6 +145,86 @@ def assessed_full_prevalence(
         numerator=len(accepted),
         denominator=len(eligible_poem_ids),
         ambiguous_only_count=len(ambiguous_only),
+    )
+
+
+# --- P7.5: validated-rule route (spec §70's second of three defensible
+# scalability routes: "a deterministic rule is calibrated against
+# reviewed material and its limits are recorded") ---
+
+RULE_VERSION = "figurative-context-stoplist-v1"
+
+# Calibrated against the mirror object's 7 reviewed fixture hits (P7.5):
+# every mirror hit whose verse names an abstract/mental noun right next
+# to the literal object turned out, on human review, to be figurative
+# ("mirror of my heart", "mirror in memory") rather than a literal
+# mirror. This is a real, named limitation, not a hidden one: the rule
+# only inspects verse-local lexical co-occurrence, is binary
+# (accepted/rejected, with no "ambiguous" bucket of its own), and is
+# calibrated on this one object over this one fixture -- it is not shown
+# to generalize to other objects or the real corpus.
+_FIGURATIVE_CONTEXT_STOPLIST = frozenset({"دل", "خاطره"})  # heart, memory
+
+
+@dataclass(frozen=True)
+class RuleDecision:
+    poem_id: int
+    decision: str  # accepted | rejected -- no ambiguous bucket, see module note above
+    rule_version: str
+    matched_stoplist_terms: frozenset
+
+
+def apply_occurrence_rule(hits: list[AnchorHit]) -> list[RuleDecision]:
+    """spec §70 route 2: a deterministic, versioned rule over each hit's
+    own verse (`AnchorHit.normalized_text` already carries it -- no
+    re-read of the source poem is needed). Rejects a hit whose verse
+    contains any `_FIGURATIVE_CONTEXT_STOPLIST` term, accepts otherwise."""
+    decisions = []
+    for h in hits:
+        verse_tokens = {t[0] for t in tokenize(h.normalized_text)}
+        matched = _FIGURATIVE_CONTEXT_STOPLIST & verse_tokens
+        decisions.append(
+            RuleDecision(
+                poem_id=h.poem_id, decision="rejected" if matched else "accepted",
+                rule_version=RULE_VERSION, matched_stoplist_terms=frozenset(matched),
+            )
+        )
+    return decisions
+
+
+@dataclass(frozen=True)
+class RuleValidationReport:
+    rule_version: str
+    agreement_count: int
+    total_reviewed: int
+    disagreement_poem_ids: frozenset
+
+
+def validate_rule_against_reviewed_material(
+    decisions: list[RuleDecision], human_assessments: dict[int, str]
+) -> RuleValidationReport:
+    """spec §70: calibrates the rule's decisions against already-reviewed
+    (human-assessed) material and records agreement -- never presented
+    as validated without this check having actually run. Ambiguous human
+    decisions are collapsed to "rejected" for this binary rule's
+    comparison, since the rule has no third bucket -- a stated limit of
+    the comparison, not a silent one."""
+    agreement = 0
+    disagreements = []
+    reviewed = 0
+    for d in decisions:
+        human = human_assessments.get(d.poem_id)
+        if human is None:
+            continue
+        reviewed += 1
+        human_binary = "accepted" if human == "accepted" else "rejected"
+        if human_binary == d.decision:
+            agreement += 1
+        else:
+            disagreements.append(d.poem_id)
+    return RuleValidationReport(
+        rule_version=RULE_VERSION, agreement_count=agreement,
+        total_reviewed=reviewed, disagreement_poem_ids=frozenset(disagreements),
     )
 
 
