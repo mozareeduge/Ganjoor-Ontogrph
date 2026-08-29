@@ -15,6 +15,7 @@ that spec's proposed structure (spec §59):
     compare.py     -- typed co-incidence, conditional association, lift, scale profile, field comparison (spec §28-30)
     ablation.py    -- Ablation + AblationRetention (spec §31)
     mediation.py   -- Mediational Incidence / relation-mediated thickness (v0.2 scope, spec §72 -- not built in v0.1)
+    records.py     -- Trace/Relation-Object/Profile/Experiment/Finding CRUD + append-only EventRecord log (spec §50-52, §54-55)
     workspace.py   -- study workspace + git-repo convention (spec §60)
     release.py     -- ResearchRelease generation (spec §55)
     validate.py    -- deterministic + epistemic contract tests, implementation gates (spec §65, §66, §69, §70)
