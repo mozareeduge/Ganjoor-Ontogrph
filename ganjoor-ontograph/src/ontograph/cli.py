@@ -233,6 +233,15 @@ def _compare(args) -> dict:
     return {"object_address": args.object, "mode": "anchor", "field_a": field_a, "field_b": field_b, **asdict(result)}
 
 
+def _validate(args) -> dict:
+    if not args.gates:
+        raise CLIError("only --gates is implemented for 'validate' in v0.1")
+    from dataclasses import asdict as _asdict
+    from ontograph.validate import run_gates
+    results = run_gates(args.repo_root, args.corpus_root, args.workspaces_dir)
+    return {"gates": [_asdict(r) for r in results], "all_green": all(r.passed for r in results)}
+
+
 def _release(args) -> dict:
     ws = _require_workspace(args)
     charter_path = ws / "field" / "charter.yml"
@@ -298,6 +307,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = top.add_parser("release", parents=[common]); p.add_argument("study_id")
     p.add_argument("--version", required=True); p.set_defaults(func=_release)
+
+    p = top.add_parser("validate", parents=[with_corpus])
+    p.add_argument("--gates", action="store_true"); p.add_argument("--repo-root", required=True)
+    p.set_defaults(func=_validate)
 
     return parser
 

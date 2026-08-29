@@ -11,7 +11,22 @@ Also responsible for the release-as-git-tag convention (spec §60/v2.3.0,
 ledger row P4.5), tying `workspace.py`'s git-backed workspace to an actual
 tagged commit per release.
 
-Implemented in ledger rows P4.4 and P4.5.
+**v0.1 embedding convention (ledger row P7.6, spec §69 gate 5).** Spec
+§55 names `object_addresses`/`load_bearing_profiles`/`findings` as
+release fields but does not fix what their list elements contain.
+Object Address/Lexical Anchor are not yet formal JSONL-backed records
+(P4.1's scope was Trace/Relation-Object/Profile/Experiment/Finding only;
+`object add`'s CLI storage, P5.1, is a flat ad hoc structure) -- so for
+this release to be reconstructable "from `release.json` alone" (spec
+§69 gate 5) without re-reading the live workspace, `object_addresses`
+entries here are `{"id":.., "anchors":[...]}` dicts, and
+`load_bearing_profiles`/`findings` entries are the full serialized
+record dicts (`dataclasses.asdict`), not bare id strings. This is a
+concrete, documented choice within what spec §55 actually specifies, not
+a silent deviation from it -- see `reconstruct_from_release()` below,
+which depends on it.
+
+Implemented in ledger rows P4.4, P4.5, and P7.6.
 """
 from __future__ import annotations
 
@@ -19,6 +34,8 @@ import json
 from dataclasses import asdict, dataclass, field as dc_field
 from pathlib import Path
 
+from ontograph.anchors import LexicalAnchor, census as run_census
+from ontograph.field import scan_corpus
 from ontograph.workspace import _run_git
 
 # spec §55, verbatim from the licensing-chain sentence a release must
@@ -107,3 +124,25 @@ def release_as_git_tag(workspace: str | Path, version: str) -> str:
     tag = f"v{version}"
     _run_git(workspace, ["tag", tag])
     return tag
+
+
+def reconstruct_from_release(release_json_path: str | Path) -> dict:
+    """spec §69 gate 5 / ledger row P7.6: rebuild study state from
+    `release.json` alone -- no read of the live workspace's
+    `objects/object-addresses.jsonl` or `research/*.jsonl` files. Uses
+    only the release's own embedded `object_addresses` (id+anchors) and
+    `corpus_snapshot` (a corpus root path) to recompute each object's
+    Anchor Hit count from scratch, and returns the embedded
+    `load_bearing_profiles`/`findings` exactly as the release carries
+    them (they are already the full record, not a reference)."""
+    release = json.loads(Path(release_json_path).read_text(encoding="utf-8"))
+    records = scan_corpus(release["corpus_snapshot"])
+    object_hit_counts = {}
+    for entry in release["object_addresses"]:
+        anchors = [LexicalAnchor(object_address=entry["id"], form=f) for f in entry["anchors"]]
+        object_hit_counts[entry["id"]] = len(run_census(records, anchors))
+    return {
+        "object_hit_counts": object_hit_counts,
+        "profiles": release["load_bearing_profiles"],
+        "findings": release["findings"],
+    }
