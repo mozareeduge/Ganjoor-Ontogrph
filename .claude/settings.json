@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ontograph study new:*)",
+      "Bash(ontograph field build:*)",
+      "Bash(ontograph object add:*)",
+      "Bash(ontograph calibrate:*)",
+      "Bash(ontograph census:*)",
+      "Bash(ontograph map recurrence:*)",
+      "Bash(ontograph companions:*)",
+      "Bash(ontograph compare:*)",
+      "Bash(ontograph ablate:*)",
+      "Bash(ontograph release:*)"
+    ]
+  }
+}

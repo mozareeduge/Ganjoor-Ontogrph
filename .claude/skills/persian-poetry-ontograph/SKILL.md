@@ -21,11 +21,20 @@ offers a source-return action.
 
 ## Status
 
-This SKILL.md is a **scaffold**, not a finished skill. The Python engine
-(`src/ontograph/*`, §59), the CLI (§62), and the fixture test suite (Part XI)
-it shells out to do not exist yet. Do not simulate their output. If
-`ontograph` is not on PATH, say so explicitly and stop — never narrate a
-result the CLI did not actually produce (§78).
+The Python engine (`src/ontograph/*`, §59), the CLI (§62), and the fixture
+test suite (Part XI) it shells out to now exist and are tested (ledger
+Phases 0-5; 78 tests passing as of this row). Do not simulate their output
+regardless. If `ontograph` is not on PATH, say so explicitly and stop —
+never narrate a result the CLI did not actually produce (§78).
+
+**Real, current limits of the v0.1 CLI** (see `ontograph/cli.py`'s own
+module docstring for the authoritative list): there is no `assess` verb
+yet, so `map`/`companions`/`ablate`/`compare` all operate at the anchor
+level and say `"mode": "anchor"` in their own JSON output — never present
+these as the assessed level to a researcher. `field build`'s `--category`
+flag and `compare`/`ablate`'s field/removal specs only resolve
+`poet:<slug>` scopes today; anything else raises a CLI error rather than
+being silently accepted.
 
 ## Division of labor
 
@@ -40,16 +49,24 @@ result the CLI did not actually produce (§78).
 ## Invocation pattern
 
 ```bash
-ontograph field build "$STUDY" --poet hafez --category ghazal --json
-ontograph object add "$STUDY" --label "آینه" --anchor "آینه" --anchor "آیینه" --json
-ontograph calibrate "$STUDY" --object mirror --sample 30 --json
-ontograph census "$STUDY" --object mirror --json
-ontograph map recurrence "$STUDY" --object mirror --unit poem --json
-ontograph companions "$STUDY" --object mirror --scale couplet --min-support 5 --json
-ontograph compare "$STUDY" --field A --field B --json
-ontograph ablate "$STUDY" --remove poet:hafez --rerun relation:mirror-rust --json
+ontograph field build "$STUDY" --poet hafez --corpus-root "$CORPUS_ROOT" --json
+ontograph object add "$STUDY" --label "آینه" --address mirror --anchor "آینه" --anchor "آیینه" --json
+ontograph object add "$STUDY" --label "زنگار" --address rust --anchor "زنگار" --json
+ontograph calibrate "$STUDY" --object mirror --sample 30 --corpus-root "$CORPUS_ROOT" --json
+ontograph census "$STUDY" --object mirror --corpus-root "$CORPUS_ROOT" --json
+ontograph map recurrence "$STUDY" --object mirror --unit poem --corpus-root "$CORPUS_ROOT" --json
+ontograph companions "$STUDY" --object mirror --with rust --scale couplet --min-support 5 --corpus-root "$CORPUS_ROOT" --json
+ontograph compare "$STUDY" --object mirror --field poet:hafez --field poet:saadi --corpus-root "$CORPUS_ROOT" --json
+ontograph ablate "$STUDY" --remove poet:hafez --rerun relation:mirror-rust --corpus-root "$CORPUS_ROOT" --json
 ontograph release "$STUDY" --version 0.1.0 --json
 ```
+
+`--address` names the stable ASCII-safe Object Address a later `--object`
+flag references (`mirror`, `rust`); `--label` is the human-readable form
+and may be Persian. Every verb below `study new` also needs
+`--corpus-root` pointing at the pinned Ganjoor snapshot (this repo's own
+root, since it vendors the corpus) or, when developing/testing this
+skill itself, at `fixtures/mini-ganjoor`.
 
 Every call:
 
