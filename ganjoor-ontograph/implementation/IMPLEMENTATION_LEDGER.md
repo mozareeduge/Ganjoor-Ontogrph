@@ -15,6 +15,19 @@ noting the correction; don't rewrite history silently.
 Status values: `todo` · `in-progress` · `done` · `blocked` (with a Notes
 entry explaining the blocker — never leave a row `blocked` silently).
 
+**v0.1 stop condition reached.** Every Phase 0–7 row is `done`; no `todo`
+or `blocked` rows remain anywhere in this ledger. `pytest tests/
+fixtures/mini-ganjoor/test_fixture_ground_truth.py -q` reports 127
+passed, 10 honestly-skipped (each with a named reason and, where
+applicable, the ledger row that scoped the gap), 1 `xfail(strict=True)`
+(Test F, mediation, v0.2 scope). `ontograph validate --gates --json`
+reports all five spec §69 gates green against the fixture corpus. Per
+`BUILD_PLAN.md`'s Definition of Done, the correct status is now "v0.1
+apparatus, gates passed on fixture corpus, real-corpus integration
+pending" — Phase 8 (manual, real-corpus smoke test) and the v0.2
+reflexive relation layer (§72, mediation) remain and are out of this
+ledger's automated scope.
+
 ## Phase 0 — Bootstrap and ground truth
 
 | ID | Task | Spec refs | Verify | Status | Notes |
