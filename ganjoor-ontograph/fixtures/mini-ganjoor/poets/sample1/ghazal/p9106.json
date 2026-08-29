@@ -19,8 +19,8 @@
       "SectionType": "WholePoem",
       "VerseType": "First",
       "RhymeLetters": "ها",
-      "PlainText": "آینهی خاطره شکست و رفت / زنگار روی قاب کهنه نشست",
-      "HtmlText": "<div class='b'>آینهی خاطره شکست و رفت / زنگار روی قاب کهنه نشست</div>",
+      "PlainText": "آینه در خاطره شکست و رفت / زنگار روی قاب کهنه نشست",
+      "HtmlText": "<div class='b'>آینه در خاطره شکست و رفت / زنگار روی قاب کهنه نشست</div>",
       "PoemFormat": "Ghazal",
       "CoupletsCount": 1
     }
@@ -29,7 +29,7 @@
     {
       "VOrder": 1,
       "Position": "Right",
-      "Text": "آینهی خاطره شکست و رفت",
+      "Text": "آینه در خاطره شکست و رفت",
       "CoupletIndex": 0,
       "SectionIndex1": 0
     },

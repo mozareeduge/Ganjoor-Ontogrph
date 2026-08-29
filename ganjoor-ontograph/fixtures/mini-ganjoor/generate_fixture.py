@@ -108,7 +108,7 @@ POEMS[9105] = poem(9105, 1, "غزل آزمایشی ۱-۵",
     "contributes one incidental HEART hit (see the HEART ground truth note).")
 
 POEMS[9106] = poem(9106, 1, "غزل آزمایشی ۱-۶",
-    [(f"{MIRROR}ی خاطره شکست و رفت", f"{RUST} روی قاب کهنه نشست")],
+    [(f"{MIRROR} در خاطره شکست و رفت", f"{RUST} روی قاب کهنه نشست")],
     "Divergence case for Finding 1 of the external review (EXTERNAL_REVIEW.md): "
     "mirror and rust are lexically present in the SAME couplet, but the mirror "
     "use ('mirror of memory') is figurative and must be assessed REJECTED, "

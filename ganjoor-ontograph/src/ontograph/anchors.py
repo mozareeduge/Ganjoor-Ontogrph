@@ -5,10 +5,83 @@ Occurrence Assessment chain) and §27.1 (exact anchor-hit census). An Anchor
 Hit states only that an anchor matched -- never that the addressed object
 occurred (spec §8.1, Appendix A: "Anchor Hit != object occurrence").
 
-Census results must distinguish anchor-level (naive) from token-aware-level
-(spec §58 tokenizer applied) counts -- see EXTERNAL_REVIEW.md Finding 3 and
-the mini-ganjoor fixture's poem 9107 for why this distinction has its own
-regression test.
-
-Implemented in ledger row P1.5.
+Census matches against TOKENS (spec §58's tokenizer, `normalize.tokenize`),
+not raw substrings -- this is what makes poem 9107's `آینه‌بند` correctly
+NOT count as a hit for anchor `آینه` (external review Finding 3). A naive
+`substring in text` implementation would over-count it; this module must
+not regress to that.
 """
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+from ontograph.field import PoemRecord
+from ontograph.normalize import NORMALIZATION_PROFILE_VERSION, TOKENIZER_VERSION, normalize, tokenize
+
+MATCHER_VERSION = "1.0.0"
+
+
+@dataclass(frozen=True)
+class LexicalAnchor:
+    object_address: str
+    form: str
+    match_mode: str = "exact"  # spec §49: exact|normalized|phrase|regex -- only "exact" implemented in v0.1
+    status: str = "approved"
+
+
+@dataclass(frozen=True)
+class AnchorHit:
+    object_address: str
+    lexical_anchor: str
+    poem_id: int
+    couplet_index: int
+    position: str
+    original_text: str
+    normalized_text: str
+    token_start: int
+    token_end: int
+    matcher_version: str = MATCHER_VERSION
+    normalization_profile: str = NORMALIZATION_PROFILE_VERSION
+    tokenizer_version: str = TOKENIZER_VERSION
+
+
+def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[AnchorHit]:
+    """Exact anchor-hit census (spec §27.1) restricted to `approved`
+    anchors (spec §49) and matched at the TOKEN level, not the substring
+    level. `anchors` may name several `object_address`es at once (e.g. one
+    call censuses both "mirror" and "rust" anchors together) -- the
+    resulting hit list is unordered across objects; group by
+    `hit.object_address` if a caller needs them separated."""
+    approved = [a for a in anchors if a.status == "approved"]
+    forms_by_object: dict[str, set[str]] = {}
+    for a in approved:
+        # normalize the anchor form itself so a caller-supplied form with,
+        # say, an Arabic Yeh variant still matches normalized tokens
+        normalized_form = normalize(a.form).normalized
+        forms_by_object.setdefault(a.object_address, set()).add(normalized_form)
+
+    hits: list[AnchorHit] = []
+    for record in records:
+        poem = json.loads(record.path.read_text(encoding="utf-8"))
+        for verse in poem["Verses"]:
+            text = verse["Text"]
+            nt = normalize(text)
+            tokens = tokenize(nt.normalized)
+            for token_text, start, end in tokens:
+                for object_address, forms in forms_by_object.items():
+                    if token_text in forms:
+                        hits.append(
+                            AnchorHit(
+                                object_address=object_address,
+                                lexical_anchor=token_text,
+                                poem_id=record.poem_id,
+                                couplet_index=verse["CoupletIndex"],
+                                position=verse["Position"],
+                                original_text=text,
+                                normalized_text=nt.normalized,
+                                token_start=start,
+                                token_end=end,
+                            )
+                        )
+    return hits
