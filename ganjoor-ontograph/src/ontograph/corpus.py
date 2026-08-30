@@ -67,6 +67,19 @@ def load_corpus_snapshot(root: str | Path, commit: str | None = None) -> CorpusS
 # link back to a source address (spec §57: "a manifest linking every
 # derived row to upstream source addresses") -- no separate provenance
 # table is needed on top of that.
+#
+# `sections` has no primary key, deliberately: a real-corpus rebuild
+# (Phase 8, ledger row P8.1) found `Section.Index` is not even unique
+# within one poem across `SectionType`s -- e.g. poem 142187 has a
+# `WholePoem` section AND a `Couplet` section both at `Index: 2`. Widening
+# a candidate key to (poem_id, idx, section_type) still collided 3,586
+# times across the real corpus. This extends P0.5's finding that
+# `SectionIndex1` cannot identify per-couplet sections in epic-format
+# poems: `Section.Index` itself is not a reliable per-poem identifier
+# either, for any `PoemFormat`. `CoupletIndex` on `verses` remains the
+# only reliable per-verse key -- `sections` rows are kept for their
+# `plain_text`/`section_type` content, addressed by `poem_id` alone, not
+# treated as individually addressable by `idx`.
 
 import sqlite3  # noqa: E402  (grouped here, next to its only use, not at module top)
 
@@ -83,9 +96,9 @@ CREATE TABLE poems (
 );
 CREATE TABLE sections (
     poem_id INTEGER, idx INTEGER, section_type TEXT, verse_type TEXT,
-    couplets_count INTEGER, plain_text TEXT,
-    PRIMARY KEY (poem_id, idx)
+    couplets_count INTEGER, plain_text TEXT
 );
+CREATE INDEX sections_poem_id_idx ON sections (poem_id);
 CREATE TABLE verses (
     poem_id INTEGER, vorder INTEGER, position TEXT, text TEXT,
     couplet_index INTEGER, section_index1 INTEGER,
@@ -145,13 +158,20 @@ def build_index(root: str | Path, db_path: str = ":memory:") -> tuple[sqlite3.Co
 
         couplets: dict[int, dict[str, int]] = {}
         for v in poem["Verses"]:
+            couplet_index = v.get("CoupletIndex")  # None for a Position="Comment"
+            # prose-commentary verse in the real corpus -- ~647 poems (e.g.
+            # Osmani's Qushayriyya, Araqi's Lama'at) carry these; spec §24:
+            # not silently forced into couplet logic. Still indexed as a
+            # verse/normalized_verse/token row (its content is not dropped),
+            # just excluded from the couplets table below.
             conn.execute(
                 "INSERT INTO verses VALUES (?, ?, ?, ?, ?, ?)",
                 (poem["Id"], v["VOrder"], v["Position"], v["Text"],
-                 v["CoupletIndex"], v.get("SectionIndex1")),
+                 couplet_index, v.get("SectionIndex1")),
             )
             verse_rows += 1
-            couplets.setdefault(v["CoupletIndex"], {})[v["Position"]] = v["VOrder"]
+            if couplet_index is not None:
+                couplets.setdefault(couplet_index, {})[v["Position"]] = v["VOrder"]
 
             nt = normalize(v["Text"])
             conn.execute(

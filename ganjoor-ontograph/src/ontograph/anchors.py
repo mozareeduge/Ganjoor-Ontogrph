@@ -35,7 +35,7 @@ class AnchorHit:
     object_address: str
     lexical_anchor: str
     poem_id: int
-    couplet_index: int
+    couplet_index: int | None  # None for a verse with no couplet -- e.g. Position="Comment" prose commentary in the real corpus (see census()'s own note)
     position: str
     original_text: str
     normalized_text: str
@@ -53,6 +53,15 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
     call censuses both "mirror" and "rust" anchors together) -- the
     resulting hit list is unordered across objects; group by
     `hit.object_address` if a caller needs them separated."""
+    # Real-corpus finding (ledger row P8.1/Phase 8): ~647 real poems (prose
+    # Sufi commentary such as Osmani's Qushayriyya, Araqi's Lama'at) carry
+    # verses with `Position: "Comment"` and no `CoupletIndex` at all --
+    # spec §24's "structurally exceptional records are not silently forced
+    # into couplet logic" applies here: such a verse is still censused (its
+    # lexical content is not silently dropped), but `couplet_index` is
+    # `None` rather than a fabricated value, and `compare.py`'s couplet-
+    # scale logic must exclude `None` from participating in couplet-scale
+    # co-incidence (two unrelated Comment verses are not "the same couplet").
     approved = [a for a in anchors if a.status == "approved"]
     forms_by_object: dict[str, set[str]] = {}
     for a in approved:
@@ -76,7 +85,7 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
                                 object_address=object_address,
                                 lexical_anchor=token_text,
                                 poem_id=record.poem_id,
-                                couplet_index=verse["CoupletIndex"],
+                                couplet_index=verse.get("CoupletIndex"),
                                 position=verse["Position"],
                                 original_text=text,
                                 normalized_text=nt.normalized,

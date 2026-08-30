@@ -67,7 +67,7 @@ def open_context_ladder(hit: AnchorHit, poem_path) -> dict:
     matched span alone (spec §9's rejection of "top search result" review)."""
     poem = json.loads(poem_path.read_text(encoding="utf-8"))
     couplet_verses = [
-        v for v in poem["Verses"] if v["CoupletIndex"] == hit.couplet_index
+        v for v in poem["Verses"] if v.get("CoupletIndex") == hit.couplet_index
     ]
     return {
         "match": hit.lexical_anchor,

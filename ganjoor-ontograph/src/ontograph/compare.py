@@ -44,7 +44,15 @@ def _poem_ids(hits: list[AnchorHit], accepted: set[int] | None, mode: str) -> se
 
 def _couplets(hits: list[AnchorHit], accepted: set[int] | None, mode: str) -> set[tuple[int, int]]:
     poem_ids = _poem_ids(hits, accepted, mode)
-    return {(h.poem_id, h.couplet_index) for h in hits if h.poem_id in poem_ids}
+    # a hit with couplet_index=None (a Position="Comment" prose-commentary
+    # verse in the real corpus, see anchors.census()'s own note) has no
+    # couplet at all and can never participate in couplet-scale
+    # co-incidence -- two such hits sharing "no couplet" are not the same
+    # couplet, so None is excluded here rather than silently grouped.
+    return {
+        (h.poem_id, h.couplet_index) for h in hits
+        if h.poem_id in poem_ids and h.couplet_index is not None
+    }
 
 
 def typed_coincidence(
