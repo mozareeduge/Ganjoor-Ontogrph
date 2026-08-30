@@ -111,6 +111,80 @@ def test_full_verb_sequence_against_fixture(tmp_path, capsys):
     assert result["tag"] == "v0.1.0"
 
 
+# --- assess verb + --mode assessed (ledger row P8.2 follow-on: the CLI's
+# missing assess verb was the most consequential real-corpus usability
+# gap surfaced by testing against the real corpus) ---
+
+def test_assess_and_mode_assessed_matches_fixture_ground_truth(tmp_path, capsys):
+    ws_dir = tmp_path / "ontograph-workspaces"
+    common = ["--corpus-root", FIXTURE_ROOT, "--workspaces-dir", str(ws_dir)]
+
+    _run(capsys, ["study", "new", "mirror-study", "--workspaces-dir", str(ws_dir)])
+    _run(capsys, ["field", "build", "mirror-study", *common])
+    _run(capsys, ["object", "add", "mirror-study", "--label", "mirror", "--address", "mirror",
+                  "--anchor", "آینه", "--anchor", "آیینه", "--workspaces-dir", str(ws_dir)])
+    _run(capsys, ["object", "add", "mirror-study", "--label", "rust", "--address", "rust",
+                  "--anchor", "زنگار", "--workspaces-dir", str(ws_dir)])
+
+    with open(pathlib.Path(FIXTURE_ROOT) / "canonical-study-assessments.json", encoding="utf-8") as f:
+        canon = json.load(f)["assessments"]
+
+    for object_address, decisions in canon.items():
+        for poem_id, decision in decisions.items():
+            code, out = _run(capsys, [
+                "assess", "mirror-study", "--object", object_address,
+                "--poem-id", poem_id, "--decision", decision,
+                "--workspaces-dir", str(ws_dir), "--json",
+            ])
+            assert code == 0
+            assert json.loads(out)["decision"] == decision
+
+    # census --mode assessed must match P2.3's 5/27 ground truth exactly
+    code, out = _run(capsys, ["census", "mirror-study", "--object", "mirror", "--mode", "assessed", *common, "--json"])
+    assert code == 0
+    result = json.loads(out)
+    assert result["mode"] == "assessed"
+    assert result["numerator"] == 5 and result["denominator"] == 27
+    assert result["ambiguous_only_count"] == 1
+
+    # companions --mode assessed must match the Finding-1 divergence: 3
+    # poems, not the anchor-level 4 (poem 9106 excluded)
+    code, out = _run(capsys, [
+        "companions", "mirror-study", "--object", "mirror", "--with", "rust",
+        "--mode", "assessed", *common, "--json",
+    ])
+    assert code == 0
+    result = json.loads(out)
+    assert result["mode"] == "assessed"
+    assert result["poem_scale"] == [9101, 9102, 9201]
+
+    # ablate --mode assessed must match P3.8's assessed-level retention (1/3, 1/2)
+    code, out = _run(capsys, [
+        "ablate", "mirror-study", "--remove", "poet:sample1", "--rerun", "relation:mirror-rust",
+        "--mode", "assessed", *common, "--json",
+    ])
+    assert code == 0
+    result = json.loads(out)
+    assert result["mode"] == "assessed"
+    assert result["original_poem_scale"] == 3 and result["remaining_poem_scale"] == 1
+    assert result["original_couplet_scale"] == 2 and result["remaining_couplet_scale"] == 1
+
+
+def test_mode_assessed_without_assessments_raises_not_falls_back(tmp_path, capsys):
+    ws_dir = tmp_path / "ontograph-workspaces"
+    common = ["--corpus-root", FIXTURE_ROOT, "--workspaces-dir", str(ws_dir)]
+    _run(capsys, ["study", "new", "mirror-study", "--workspaces-dir", str(ws_dir)])
+    _run(capsys, ["field", "build", "mirror-study", *common])
+    _run(capsys, ["object", "add", "mirror-study", "--label", "mirror", "--address", "mirror",
+                  "--anchor", "آینه", "--anchor", "آیینه", "--workspaces-dir", str(ws_dir)])
+
+    code = main(["census", "mirror-study", "--object", "mirror", "--mode", "assessed", *common])
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "no assessments recorded" in captured.err
+    assert captured.out == ""
+
+
 # --- P5.2: no search/query verbs anywhere in the CLI ---
 
 def test_help_contains_no_search_or_query_verb(capsys):

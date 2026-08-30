@@ -12,16 +12,21 @@ on one line -- v0.1 has no separate prose renderer (that lives in the
 conversational skill, Phase 6, per spec §41-43's progressive-disclosure
 layer, not the deterministic CLI itself).
 
-Every result at this phase that reads Anchor Hits does so at the raw
-anchor level and says `"mode": "anchor"` explicitly in its own output --
-there is no `assess` verb yet to build an OccurrencePolicy from a study's
-own Occurrence Ledger, so `map`/`companions`/`ablate`/`compare` cannot
-honestly claim the assessed level here (spec §8.1, Appendix A: "Anchor
-Hit != object occurrence"). This is a real, stated scope limit of this
-CLI phase, not a silent regression to the anchor/assessed conflation
-Finding 1 of the external review was about.
+Every verb that reads Anchor Hits accepts `--mode anchor|assessed`
+(default `anchor`) and says which mode it used in its own output. `assess`
+records one `OccurrenceAssessment` at a time into the study's Occurrence
+Ledger (`corpus/occurrence-ledger.jsonl`, spec §60's own workspace
+layout); `--mode assessed` on `census`/`map recurrence`/`companions`/
+`ablate`/`compare` reads that ledger and refuses (`CLIError`) rather than
+silently falling back to anchor level if no assessments have been
+recorded yet for the object(s) involved (spec §8.1, Appendix A: "Anchor
+Hit != object occurrence" -- the exact collapse Finding 1 of the
+external review was about, now guarded at the CLI surface too, not just
+in `compare.py`/`ablation.py` themselves).
 
-Implemented in ledger rows P5.1-P5.3.
+Implemented in ledger rows P5.1-P5.3, extended in Phase 8 (ledger row
+P8.2's own testing surfaced the missing `assess` verb as the CLI's most
+consequential real-corpus usability gap).
 """
 from __future__ import annotations
 
@@ -33,8 +38,15 @@ from pathlib import Path
 
 from ontograph.ablation import ablation_retention
 from ontograph.anchors import LexicalAnchor, census as run_census
-from ontograph.census import calibration_sample, open_context_ladder
-from ontograph.compare import MODE_ANCHOR, InsufficientSupportError, compare_fields, lift, typed_coincidence
+from ontograph.census import (
+    OccurrenceAssessment,
+    accepted_poem_ids,
+    ambiguous_only_poem_ids,
+    assessed_full_prevalence,
+    calibration_sample,
+    open_context_ladder,
+)
+from ontograph.compare import MODE_ANCHOR, MODE_ASSESSED, InsufficientSupportError, compare_fields, lift, typed_coincidence
 from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet, scan_corpus
 from ontograph.metrics import spread
 from ontograph.release import DATA_LICENSE_NOTICE, generate_release, release_as_git_tag
@@ -84,6 +96,36 @@ def _load_object_entry(ws: Path, object_address: str) -> dict:
 def _anchors_for(ws: Path, object_address: str) -> list[LexicalAnchor]:
     entry = _load_object_entry(ws, object_address)
     return [LexicalAnchor(object_address=object_address, form=f) for f in entry["anchors"]]
+
+
+def _occurrence_ledger_path(ws: Path) -> Path:
+    return ws / "corpus" / "occurrence-ledger.jsonl"
+
+
+def _load_assessments(ws: Path, object_address: str) -> dict[int, str]:
+    """poem_id -> decision, latest entry wins per poem (re-assessment is
+    normal calibration practice, unlike the append-only EventRecord log)."""
+    path = _occurrence_ledger_path(ws)
+    assessments: dict[int, str] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            if entry["object_address"] == object_address:
+                assessments[entry["anchor_hit_poem_id"]] = entry["decision"]
+    return assessments
+
+
+def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
+    assessments = _load_assessments(ws, object_address)
+    if not assessments:
+        raise CLIError(
+            f"no assessments recorded for object {object_address!r} -- "
+            f"run 'ontograph assess' first, or use --mode anchor"
+        )
+    return accepted_poem_ids(hits, assessments)
 
 
 # --- verb implementations, each returning a plain JSON-serializable dict ---
@@ -141,6 +183,24 @@ def _object_add(args) -> dict:
     return {"object_address": object_address, "label": args.label, "anchors": args.anchor}
 
 
+def _assess(args) -> dict:
+    ws = _require_workspace(args)
+    if args.decision not in ("accepted", "rejected", "ambiguous"):
+        raise CLIError("--decision must be one of accepted|rejected|ambiguous")
+    assessment = OccurrenceAssessment(
+        anchor_hit_poem_id=args.poem_id, object_address=args.object,
+        decision=args.decision, rationale=args.rationale or "", assessor=args.assessor,
+    )
+    path = _occurrence_ledger_path(ws)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(asdict(assessment), ensure_ascii=False) + "\n")
+    return {
+        "object_address": args.object, "poem_id": args.poem_id,
+        "decision": args.decision, "assessor": args.assessor,
+    }
+
+
 def _calibrate(args) -> dict:
     ws = _require_workspace(args)
     records = scan_corpus(args.corpus_root)
@@ -155,8 +215,26 @@ def _census(args) -> dict:
     ws = _require_workspace(args)
     records = scan_corpus(args.corpus_root)
     hits = run_census(records, _anchors_for(ws, args.object))
-    poems = sorted({h.poem_id for h in hits})
-    return {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
+    if args.mode == "anchor":
+        poems = sorted({h.poem_id for h in hits})
+        return {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
+
+    assessments = _load_assessments(ws, args.object)
+    if not assessments:
+        raise CLIError(
+            f"no assessments recorded for object {args.object!r} -- "
+            f"run 'ontograph assess' first, or use --mode anchor"
+        )
+    all_poem_ids = {r.poem_id for r in records}
+    accepted = accepted_poem_ids(hits, assessments)
+    ambiguous_only = ambiguous_only_poem_ids(hits, assessments)
+    prevalence = assessed_full_prevalence(all_poem_ids, hits, assessments)
+    return {
+        "object_address": args.object, "mode": "assessed",
+        "numerator": prevalence.numerator, "denominator": prevalence.denominator,
+        "ambiguous_only_count": prevalence.ambiguous_only_count,
+        "accepted_poems": sorted(accepted), "ambiguous_only_poems": sorted(ambiguous_only),
+    }
 
 
 def _map_recurrence(args) -> dict:
@@ -165,10 +243,13 @@ def _map_recurrence(args) -> dict:
     ws = _require_workspace(args)
     records = scan_corpus(args.corpus_root)
     hits = run_census(records, _anchors_for(ws, args.object))
-    poems_with_object = {h.poem_id for h in hits}
+    if args.mode == "anchor":
+        poems_with_object = {h.poem_id for h in hits}
+    else:
+        poems_with_object = _accepted_or_raise(ws, args.object, hits)
     s = spread(poems_with_object, records)
     return {
-        "object_address": args.object, "mode": "anchor", "unit": "poem",
+        "object_address": args.object, "mode": args.mode, "unit": "poem",
         "distinct_poems": s.distinct_poems, "distinct_poets": s.distinct_poets,
         "total_poems": s.total_poems, "total_poets": s.total_poets,
     }
@@ -179,14 +260,22 @@ def _companions(args) -> dict:
     records = scan_corpus(args.corpus_root)
     hits_a = run_census(records, _anchors_for(ws, args.object))
     hits_b = run_census(records, _anchors_for(ws, args.with_))
-    result = typed_coincidence(hits_a, hits_b, mode=MODE_ANCHOR)
+
+    if args.mode == "anchor":
+        result = typed_coincidence(hits_a, hits_b, mode=MODE_ANCHOR)
+        poems_a = {h.poem_id for h in hits_a}
+        poems_b = {h.poem_id for h in hits_b}
+    else:
+        accepted_a = _accepted_or_raise(ws, args.object, hits_a)
+        accepted_b = _accepted_or_raise(ws, args.with_, hits_b)
+        result = typed_coincidence(hits_a, hits_b, mode=MODE_ASSESSED, accepted_a=accepted_a, accepted_b=accepted_b)
+        poems_a, poems_b = accepted_a, accepted_b
+
     out = {
-        "object_address": args.object, "with": args.with_, "mode": "anchor", "scale": args.scale,
+        "object_address": args.object, "with": args.with_, "mode": args.mode, "scale": args.scale,
         "poem_scale": sorted(result.poem_scale),
         "couplet_scale": sorted(list(t) for t in result.couplet_scale),
     }
-    poems_a = {h.poem_id for h in hits_a}
-    poems_b = {h.poem_id for h in hits_b}
     try:
         lift_result = lift(poems_a, poems_b, field_size=len(records), minimum_support=args.min_support)
         out["lift"] = asdict(lift_result)
@@ -211,8 +300,17 @@ def _ablate(args) -> dict:
     removed_poem_ids = {r.poem_id for r in records if r.poet_slug == removed_slug}
     hits_a = run_census(records, _anchors_for(ws, addr_a))
     hits_b = run_census(records, _anchors_for(ws, addr_b))
-    result = ablation_retention(hits_a, hits_b, MODE_ANCHOR, removed_poem_ids)
-    return {"removed": args.remove, "relation": f"{addr_a}-{addr_b}", "mode": "anchor", **asdict(result)}
+
+    if args.mode == "anchor":
+        result = ablation_retention(hits_a, hits_b, MODE_ANCHOR, removed_poem_ids)
+    else:
+        accepted_a = _accepted_or_raise(ws, addr_a, hits_a)
+        accepted_b = _accepted_or_raise(ws, addr_b, hits_b)
+        result = ablation_retention(
+            hits_a, hits_b, MODE_ASSESSED, removed_poem_ids,
+            accepted_a=accepted_a, accepted_b=accepted_b,
+        )
+    return {"removed": args.remove, "relation": f"{addr_a}-{addr_b}", "mode": args.mode, **asdict(result)}
 
 
 def _compare(args) -> dict:
@@ -224,13 +322,13 @@ def _compare(args) -> dict:
             raise CLIError("unsupported --field spec in v0.1 (only 'poet:<slug>' is implemented)")
     records = scan_corpus(args.corpus_root)
     hits = run_census(records, _anchors_for(ws, args.object))
-    hit_poems = {h.poem_id for h in hits}
+    hit_poems = {h.poem_id for h in hits} if args.mode == "anchor" else _accepted_or_raise(ws, args.object, hits)
     field_a, field_b = args.fields
     slug_a, slug_b = field_a[len("poet:"):], field_b[len("poet:"):]
     poems_a = {r.poem_id for r in records if r.poet_slug == slug_a}
     poems_b = {r.poem_id for r in records if r.poet_slug == slug_b}
     result = compare_fields(hit_poems & poems_a, len(poems_a), hit_poems & poems_b, len(poems_b))
-    return {"object_address": args.object, "mode": "anchor", "field_a": field_a, "field_b": field_b, **asdict(result)}
+    return {"object_address": args.object, "mode": args.mode, "field_a": field_a, "field_b": field_b, **asdict(result)}
 
 
 def _validate(args) -> dict:
@@ -279,30 +377,41 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--label", required=True); p.add_argument("--address")
     p.add_argument("--anchor", action="append"); p.set_defaults(func=_object_add)
 
+    p = top.add_parser("assess", parents=[common]); p.add_argument("study_id")
+    p.add_argument("--object", required=True); p.add_argument("--poem-id", type=int, required=True)
+    p.add_argument("--decision", required=True, choices=["accepted", "rejected", "ambiguous"])
+    p.add_argument("--rationale", default=""); p.add_argument("--assessor", default="human")
+    p.set_defaults(func=_assess)
+
     p = top.add_parser("calibrate", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--sample", type=int, default=10)
     p.add_argument("--seed", type=int, default=0); p.set_defaults(func=_calibrate)
 
     p = top.add_parser("census", parents=[with_corpus]); p.add_argument("study_id")
-    p.add_argument("--object", required=True); p.set_defaults(func=_census)
+    p.add_argument("--object", required=True); p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
+    p.set_defaults(func=_census)
 
     map_ = top.add_parser("map").add_subparsers(dest="map_verb", required=True)
     p = map_.add_parser("recurrence", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--unit", default="poem")
+    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
     p.set_defaults(func=_map_recurrence)
 
     p = top.add_parser("companions", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--with", dest="with_", required=True)
     p.add_argument("--scale", default="poem"); p.add_argument("--min-support", type=int, default=5)
+    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
     p.set_defaults(func=_companions)
 
     p = top.add_parser("compare", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True)
     p.add_argument("--field", dest="fields", action="append", required=True)
+    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
     p.set_defaults(func=_compare)
 
     p = top.add_parser("ablate", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--remove", required=True); p.add_argument("--rerun", required=True)
+    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
     p.set_defaults(func=_ablate)
 
     p = top.add_parser("release", parents=[common]); p.add_argument("study_id")

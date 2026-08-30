@@ -23,18 +23,19 @@ offers a source-return action.
 
 The Python engine (`src/ontograph/*`, §59), the CLI (§62), and the fixture
 test suite (Part XI) it shells out to now exist and are tested (ledger
-Phases 0-5; 78 tests passing as of this row). Do not simulate their output
-regardless. If `ontograph` is not on PATH, say so explicitly and stop —
-never narrate a result the CLI did not actually produce (§78).
+Phases 0-8; 134 tests passing as of this row, plus a real SQLite index
+successfully rebuilt against the full real corpus). Do not simulate their
+output regardless. If `ontograph` is not on PATH, say so explicitly and
+stop — never narrate a result the CLI did not actually produce (§78).
 
 **Real, current limits of the v0.1 CLI** (see `ontograph/cli.py`'s own
-module docstring for the authoritative list): there is no `assess` verb
-yet, so `map`/`companions`/`ablate`/`compare` all operate at the anchor
-level and say `"mode": "anchor"` in their own JSON output — never present
-these as the assessed level to a researcher. `field build`'s `--category`
+module docstring for the authoritative list): `field build`'s `--category`
 flag and `compare`/`ablate`'s field/removal specs only resolve
 `poet:<slug>` scopes today; anything else raises a CLI error rather than
-being silently accepted.
+being silently accepted. `--mode assessed` (on `census`/`map recurrence`/
+`companions`/`ablate`/`compare`) requires the researcher to have already
+run `ontograph assess` for every object involved — it raises rather than
+silently falling back to `--mode anchor` if no assessments are recorded.
 
 ## Division of labor
 
@@ -54,10 +55,12 @@ ontograph object add "$STUDY" --label "آینه" --address mirror --anchor "آی
 ontograph object add "$STUDY" --label "زنگار" --address rust --anchor "زنگار" --json
 ontograph calibrate "$STUDY" --object mirror --sample 30 --corpus-root "$CORPUS_ROOT" --json
 ontograph census "$STUDY" --object mirror --corpus-root "$CORPUS_ROOT" --json
-ontograph map recurrence "$STUDY" --object mirror --unit poem --corpus-root "$CORPUS_ROOT" --json
-ontograph companions "$STUDY" --object mirror --with rust --scale couplet --min-support 5 --corpus-root "$CORPUS_ROOT" --json
-ontograph compare "$STUDY" --object mirror --field poet:hafez --field poet:saadi --corpus-root "$CORPUS_ROOT" --json
-ontograph ablate "$STUDY" --remove poet:hafez --rerun relation:mirror-rust --corpus-root "$CORPUS_ROOT" --json
+ontograph assess "$STUDY" --object mirror --poem-id 2435 --decision ambiguous --rationale "fixed idiom هر آینه, not a literal mirror" --json
+ontograph census "$STUDY" --object mirror --mode assessed --corpus-root "$CORPUS_ROOT" --json
+ontograph map recurrence "$STUDY" --object mirror --unit poem --mode assessed --corpus-root "$CORPUS_ROOT" --json
+ontograph companions "$STUDY" --object mirror --with rust --scale couplet --min-support 5 --mode assessed --corpus-root "$CORPUS_ROOT" --json
+ontograph compare "$STUDY" --object mirror --field poet:hafez --field poet:saadi --mode assessed --corpus-root "$CORPUS_ROOT" --json
+ontograph ablate "$STUDY" --remove poet:hafez --rerun relation:mirror-rust --mode assessed --corpus-root "$CORPUS_ROOT" --json
 ontograph release "$STUDY" --version 0.1.0 --json
 ```
 
@@ -67,6 +70,15 @@ and may be Persian. Every verb below `study new` also needs
 `--corpus-root` pointing at the pinned Ganjoor snapshot (this repo's own
 root, since it vendors the corpus) or, when developing/testing this
 skill itself, at `fixtures/mini-ganjoor`.
+
+Every one of `census`/`map recurrence`/`companions`/`ablate`/`compare`
+accepts `--mode anchor|assessed` (default `anchor`). `assess` records one
+Occurrence Assessment (`accepted`/`rejected`/`ambiguous`) per poem, per
+object, into the study's Occurrence Ledger — run it once per calibration
+hit reviewed before asking for `--mode assessed` results; a call to
+`--mode assessed` with nothing recorded yet fails loudly rather than
+quietly reporting the anchor level under an assessed label (spec §8.1,
+Appendix A: "Anchor Hit != object occurrence").
 
 Every call:
 
@@ -91,9 +103,9 @@ Every result is shown as:
 ## Permissioning (spec §79)
 
 Corpus-mutating and release-creating verbs (`field build`, `object add`,
-`calibrate`, `release`) should be named explicitly in the project's
-`.claude/settings.json` allowlist. Destructive verbs (workspace deletion,
-forced object merge) must never be allowlisted; always ask.
+`calibrate`, `assess`, `release`) should be named explicitly in the
+project's `.claude/settings.json` allowlist. Destructive verbs (workspace
+deletion, forced object merge) must never be allowlisted; always ask.
 
 ## References
 
