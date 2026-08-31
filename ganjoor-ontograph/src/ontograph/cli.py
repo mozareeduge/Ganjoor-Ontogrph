@@ -50,7 +50,7 @@ from ontograph.compare import MODE_ANCHOR, MODE_ASSESSED, InsufficientSupportErr
 from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet, scan_corpus
 from ontograph.metrics import spread
 from ontograph.release import DATA_LICENSE_NOTICE, generate_release, release_as_git_tag
-from ontograph.workspace import new_study
+from ontograph.workspace import new_study, read_study_config
 
 
 class CLIError(Exception):
@@ -118,6 +118,22 @@ def _load_assessments(ws: Path, object_address: str) -> dict[int, str]:
     return assessments
 
 
+def _resolve_corpus_root(args, ws: Path) -> str:
+    """Ledger row P9.1: an explicit `--corpus-root` always overrides; absent
+    that, fall back to what `study new --corpus-root` persisted for this
+    study. Raises -- never silently proceeds with no corpus root at all."""
+    if getattr(args, "corpus_root", None):
+        return args.corpus_root
+    stored = read_study_config(ws).get("corpus_root")
+    if stored:
+        return stored
+    raise CLIError(
+        "no --corpus-root given and this study has none stored -- "
+        "pass --corpus-root explicitly, or re-run 'ontograph study new "
+        "--corpus-root ...' to store one for next time"
+    )
+
+
 def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
     assessments = _load_assessments(ws, object_address)
     if not assessments:
@@ -132,8 +148,11 @@ def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
 
 def _study_new(args) -> dict:
     ws = _workspace_path(args)
-    new_study(args.workspaces_dir, args.study_id)
-    return {"study_id": args.study_id, "workspace": str(ws)}
+    new_study(args.workspaces_dir, args.study_id, corpus_root=args.corpus_root)
+    result = {"study_id": args.study_id, "workspace": str(ws)}
+    if args.corpus_root:
+        result["corpus_root"] = args.corpus_root
+    return result
 
 
 def _field_build(args) -> dict:
@@ -143,11 +162,12 @@ def _field_build(args) -> dict:
             "--category is not supported in v0.1 (ScopeSpec has no category "
             "leaf kind yet); use --poet or omit both for the full field"
         )
-    records = scan_corpus(args.corpus_root)
+    corpus_root = _resolve_corpus_root(args, ws)
+    records = scan_corpus(corpus_root)
     scope: ScopeSpec = poet(args.poet) if args.poet else all_poems()
     charter = FieldCharter(
         purpose=f"field for study {args.study_id}",
-        corpus_snapshot=str(args.corpus_root),
+        corpus_snapshot=str(corpus_root),
         scope_spec=scope,
     )
     poem_ids = sorted(charter.poem_ids(records))
@@ -203,7 +223,8 @@ def _assess(args) -> dict:
 
 def _calibrate(args) -> dict:
     ws = _require_workspace(args)
-    records = scan_corpus(args.corpus_root)
+    corpus_root = _resolve_corpus_root(args, ws)
+    records = scan_corpus(corpus_root)
     records_by_id = {r.poem_id: r for r in records}
     hits = run_census(records, _anchors_for(ws, args.object))
     sample = calibration_sample(hits, sample_size=args.sample, seed=args.seed)
@@ -213,7 +234,8 @@ def _calibrate(args) -> dict:
 
 def _census(args) -> dict:
     ws = _require_workspace(args)
-    records = scan_corpus(args.corpus_root)
+    corpus_root = _resolve_corpus_root(args, ws)
+    records = scan_corpus(corpus_root)
     hits = run_census(records, _anchors_for(ws, args.object))
     if args.mode == "anchor":
         poems = sorted({h.poem_id for h in hits})
@@ -241,7 +263,8 @@ def _map_recurrence(args) -> dict:
     if args.unit != "poem":
         raise CLIError(f"unsupported --unit {args.unit!r} in v0.1 (only 'poem' is implemented)")
     ws = _require_workspace(args)
-    records = scan_corpus(args.corpus_root)
+    corpus_root = _resolve_corpus_root(args, ws)
+    records = scan_corpus(corpus_root)
     hits = run_census(records, _anchors_for(ws, args.object))
     if args.mode == "anchor":
         poems_with_object = {h.poem_id for h in hits}
@@ -257,7 +280,8 @@ def _map_recurrence(args) -> dict:
 
 def _companions(args) -> dict:
     ws = _require_workspace(args)
-    records = scan_corpus(args.corpus_root)
+    corpus_root = _resolve_corpus_root(args, ws)
+    records = scan_corpus(corpus_root)
     hits_a = run_census(records, _anchors_for(ws, args.object))
     hits_b = run_census(records, _anchors_for(ws, args.with_))
 
@@ -296,7 +320,8 @@ def _ablate(args) -> dict:
     if not addr_a or not addr_b:
         raise CLIError("--rerun relation spec must be 'relation:<addr-a>-<addr-b>'")
 
-    records = scan_corpus(args.corpus_root)
+    corpus_root = _resolve_corpus_root(args, ws)
+    records = scan_corpus(corpus_root)
     removed_poem_ids = {r.poem_id for r in records if r.poet_slug == removed_slug}
     hits_a = run_census(records, _anchors_for(ws, addr_a))
     hits_b = run_census(records, _anchors_for(ws, addr_b))
@@ -320,7 +345,8 @@ def _compare(args) -> dict:
     for f in args.fields:
         if not f.startswith("poet:"):
             raise CLIError("unsupported --field spec in v0.1 (only 'poet:<slug>' is implemented)")
-    records = scan_corpus(args.corpus_root)
+    corpus_root = _resolve_corpus_root(args, ws)
+    records = scan_corpus(corpus_root)
     hits = run_census(records, _anchors_for(ws, args.object))
     hit_poems = {h.poem_id for h in hits} if args.mode == "anchor" else _accepted_or_raise(ws, args.object, hits)
     field_a, field_b = args.fields
@@ -359,14 +385,21 @@ def _build_parser() -> argparse.ArgumentParser:
     common.add_argument("--workspaces-dir", default="ontograph-workspaces")
     common.add_argument("--json", action="store_true", help="pretty-print the result object")
 
+    # Ledger row P9.1: --corpus-root is optional on every corpus-consuming
+    # verb — an explicit flag overrides, otherwise the resolver falls back
+    # to the root stored by `study new --corpus-root`, and raises a clean
+    # CLIError when neither exists. `validate` consumes args.corpus_root
+    # directly (run_gates), so an omitted root reaches it as None.
     with_corpus = argparse.ArgumentParser(add_help=False, parents=[common])
-    with_corpus.add_argument("--corpus-root", required=True)
+    with_corpus.add_argument("--corpus-root", required=False, default=None)
 
     parser = argparse.ArgumentParser(prog="ontograph", description="Deterministic Ganjoor Ontograph inquiry engine CLI.")
     top = parser.add_subparsers(dest="verb", required=True)
 
     study = top.add_parser("study").add_subparsers(dest="study_verb", required=True)
-    p = study.add_parser("new", parents=[common]); p.add_argument("study_id"); p.set_defaults(func=_study_new)
+    p = study.add_parser("new", parents=[common]); p.add_argument("study_id")
+    p.add_argument("--corpus-root", default=None)  # P9.1: optionally persist the corpus root for later verbs
+    p.set_defaults(func=_study_new)
 
     field = top.add_parser("field").add_subparsers(dest="field_verb", required=True)
     p = field.add_parser("build", parents=[with_corpus]); p.add_argument("study_id")

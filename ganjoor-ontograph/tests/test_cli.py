@@ -185,6 +185,84 @@ def test_mode_assessed_without_assessments_raises_not_falls_back(tmp_path, capsy
     assert captured.out == ""
 
 
+# --- P9.1: a study that stored a corpus root lets later verbs omit
+# --corpus-root; explicit flag still wins; neither → clean CLIError ---
+
+def test_p91_stored_corpus_root_lets_verbs_omit_the_flag(tmp_path, capsys):
+    ws_dir = tmp_path / "ontograph-workspaces"
+
+    # `study new --corpus-root` persists the root into study.yml
+    code, out = _run(capsys, [
+        "study", "new", "mirror-study", "--corpus-root", FIXTURE_ROOT,
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    assert json.loads(out)["corpus_root"] == FIXTURE_ROOT
+
+    _run(capsys, ["object", "add", "mirror-study", "--label", "mirror", "--address", "mirror",
+                  "--anchor", "آینه", "--anchor", "آیینه", "--workspaces-dir", str(ws_dir)])
+
+    # census with NO --corpus-root must succeed and match the explicit-flag result
+    code, out = _run(capsys, [
+        "census", "mirror-study", "--object", "mirror",
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    result = json.loads(out)
+    assert result["hit_count"] == 7  # same P1.5 anchor-level ground truth as the explicit-flag run
+
+    # field build (also rewired onto the resolver) behaves the same way
+    code, out = _run(capsys, [
+        "field", "build", "mirror-study", "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    assert json.loads(out)["poem_count"] == 27
+
+    # assess never touches the corpus, so it must run with neither a flag
+    # nor a stored root (the resolver is simply not in its path)
+    code, out = _run(capsys, [
+        "assess", "mirror-study", "--object", "mirror", "--poem-id", "9101",
+        "--decision", "accepted", "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    assert json.loads(out)["decision"] == "accepted"
+
+
+def test_p91_explicit_corpus_root_overrides_the_stored_value(tmp_path, capsys):
+    ws_dir = tmp_path / "ontograph-workspaces"
+    bogus = str(tmp_path / "not-a-corpus")
+
+    # store a WRONG root, then prove the explicit flag wins
+    code, _ = _run(capsys, [
+        "study", "new", "mirror-study", "--corpus-root", bogus,
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    _run(capsys, ["object", "add", "mirror-study", "--label", "mirror", "--address", "mirror",
+                  "--anchor", "آینه", "--anchor", "آیینه", "--workspaces-dir", str(ws_dir)])
+
+    code, out = _run(capsys, [
+        "census", "mirror-study", "--object", "mirror", "--corpus-root", FIXTURE_ROOT,
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    assert json.loads(out)["hit_count"] == 7  # scanned the explicit root, not the stored bogus one
+
+
+def test_p91_no_stored_root_and_no_flag_is_a_clean_clierror(tmp_path, capsys):
+    ws_dir = tmp_path / "ontograph-workspaces"
+    _run(capsys, ["study", "new", "mirror-study", "--workspaces-dir", str(ws_dir)])
+    _run(capsys, ["object", "add", "mirror-study", "--label", "mirror", "--address", "mirror",
+                  "--anchor", "آینه", "--workspaces-dir", str(ws_dir)])
+
+    code = main(["census", "mirror-study", "--object", "mirror",
+                 "--workspaces-dir", str(ws_dir), "--json"])
+    captured = capsys.readouterr()
+    assert code == 1  # CLIError, not an argparse usage error or a traceback
+    assert "no --corpus-root" in captured.err
+    assert captured.out == ""
+
+
 # --- P5.2: no search/query verbs anywhere in the CLI ---
 
 def test_help_contains_no_search_or_query_verb(capsys):
