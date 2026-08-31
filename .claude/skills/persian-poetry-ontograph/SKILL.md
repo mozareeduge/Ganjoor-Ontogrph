@@ -53,8 +53,28 @@ silently falling back to `--mode anchor` if no assessments are recorded.
 ontograph field build "$STUDY" --poet hafez --corpus-root "$CORPUS_ROOT" --json
 ontograph object add "$STUDY" --label "آینه" --address mirror --anchor "آینه" --anchor "آیینه" --json
 ontograph object add "$STUDY" --label "زنگار" --address rust --anchor "زنگار" --json
-ontograph calibrate "$STUDY" --object mirror --sample 30 --corpus-root "$CORPUS_ROOT" --json
-ontograph census "$STUDY" --object mirror --corpus-root "$CORPUS_ROOT" --json
+
+# P9.5 guided calibration/assessment flow — the DEFAULT path for assessing
+# a sample. One command replaces per-hit `calibrate` + repeated `assess`
+# calls: it pulls the seeded sample, walks each hit with its context
+# ladder, and surfaces — never forces — the next-action choices:
+#   a/r/u   accept / reject / ambiguous        (batched, written at the end)
+#   n:<فرم>  narrow the anchor (first-class anchor-revision event, then the
+#            researcher re-decides the hit against the narrowed anchor)
+#   t       promote this hit to a Trace record (written immediately)
+#   w / x   widen / stop the sample
+#   Enter   leave undecided (listed in the result, NEVER imputed)
+#   done    finish and write the batch
+ontograph walk "$STUDY" --object mirror --sample 30 --corpus-root "$CORPUS_ROOT" --json
+# Non-interactive/replayable form (exactly what the fixture walkthrough test drives):
+#   ontograph walk "$STUDY" --object mirror --script responses.json --corpus-root "$CORPUS_ROOT" --json
+# where responses.json is {"responses": ["a", "u", "n:آیینه", "t", "a", ...]} — one token
+# per hit in sample order. The P9.5 verify target: this flow against the mini-ganjoor
+# fixture reproduces canonical-study-assessments.json exactly (5 accepted / 1 ambiguous
+# / 1 rejected; assessed census 5/27).
+
+# Per-hit `assess` remains available for one-off corrections after a walk
+# (re-assessment is normal calibration practice; latest entry wins):
 ontograph assess "$STUDY" --object mirror --poem-id 2435 --decision ambiguous --rationale "fixed idiom هر آینه, not a literal mirror" --json
 ontograph census "$STUDY" --object mirror --mode assessed --corpus-root "$CORPUS_ROOT" --json
 ontograph map recurrence "$STUDY" --object mirror --unit poem --mode assessed --corpus-root "$CORPUS_ROOT" --json
@@ -74,11 +94,14 @@ skill itself, at `fixtures/mini-ganjoor`.
 Every one of `census`/`map recurrence`/`companions`/`ablate`/`compare`
 accepts `--mode anchor|assessed` (default `anchor`). `assess` records one
 Occurrence Assessment (`accepted`/`rejected`/`ambiguous`) per poem, per
-object, into the study's Occurrence Ledger — run it once per calibration
-hit reviewed before asking for `--mode assessed` results; a call to
-`--mode assessed` with nothing recorded yet fails loudly rather than
-quietly reporting the anchor level under an assessed label (spec §8.1,
-Appendix A: "Anchor Hit != object occurrence").
+object, into the study's Occurrence Ledger — but the DEFAULT way to
+produce those assessments is the guided `walk` flow above, which batches
+them and surfaces the structural choices (narrow/split/promote) at the
+moment each hit is on screen. One-off corrections after a walk use
+per-hit `assess` (latest entry wins). A call to `--mode assessed` with
+nothing recorded yet fails loudly rather than quietly reporting the
+anchor level under an assessed label (spec §8.1, Appendix A: "Anchor
+Hit != object occurrence").
 
 Every call:
 
