@@ -47,7 +47,7 @@ from ontograph.census import (
     open_context_ladder,
 )
 from ontograph.compare import MODE_ANCHOR, MODE_ASSESSED, InsufficientSupportError, compare_fields, lift, typed_coincidence
-from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet
+from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet, scope_from_dict
 from ontograph.index_cache import (
     census_from_index,
     get_or_build_index,
@@ -151,6 +151,22 @@ def _open_cached_index(args, ws: Path):
     return conn, records
 
 
+def _scope_allowed(ws: Path, records: list) -> set[int] | None:
+    """Ledger row P9.4: `field/scope.json` — written by `field build` since
+    P5.1 but never read again — becomes a real filter. When the study has
+    a stored scope, the other verbs intersect their own query with it: the
+    returned poem-id set is the study's field, and hits/populations
+    outside it do not exist for this study (spec §7: constructing the
+    Object-Field is the first methodological step, not a write-only
+    artifact). No scope.json (studies built before any `field build`) →
+    None, no filtering — P9.1's stored-corpus flow is unaffected."""
+    path = ws / "field" / "scope.json"
+    if not path.exists():
+        return None
+    scope = scope_from_dict(json.loads(path.read_text(encoding="utf-8")))
+    return scope.resolve(records)
+
+
 def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
     assessments = _load_assessments(ws, object_address)
     if not assessments:
@@ -245,8 +261,13 @@ def _calibrate(args) -> dict:
     ws = _require_workspace(args)
     conn, records = _open_cached_index(args, ws)
     try:
-        records_by_id = {r.poem_id: r for r in records}
+        allowed = _scope_allowed(ws, records)
+        if allowed is not None:
+            records = [r for r in records if r.poem_id in allowed]
         hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        if allowed is not None:
+            hits = [h for h in hits if h.poem_id in allowed]
+        records_by_id = {r.poem_id: r for r in records}
         sample = calibration_sample(hits, sample_size=args.sample, seed=args.seed)
         context = [open_context_ladder(h, records_by_id[h.poem_id].path) for h in sample]
     finally:
@@ -259,6 +280,10 @@ def _census(args) -> dict:
     conn, records = _open_cached_index(args, ws)
     try:
         hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        allowed = _scope_allowed(ws, records)
+        if allowed is not None:
+            records = [r for r in records if r.poem_id in allowed]
+            hits = [h for h in hits if h.poem_id in allowed]
         if args.mode == "anchor":
             poems = sorted({h.poem_id for h in hits})
             return {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
@@ -290,6 +315,10 @@ def _map_recurrence(args) -> dict:
     conn, records = _open_cached_index(args, ws)
     try:
         hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        allowed = _scope_allowed(ws, records)
+        if allowed is not None:
+            records = [r for r in records if r.poem_id in allowed]
+            hits = [h for h in hits if h.poem_id in allowed]
         if args.mode == "anchor":
             poems_with_object = {h.poem_id for h in hits}
         else:
@@ -310,6 +339,11 @@ def _companions(args) -> dict:
     try:
         hits_a = census_from_index(conn, records, _anchors_for(ws, args.object))
         hits_b = census_from_index(conn, records, _anchors_for(ws, args.with_))
+        allowed = _scope_allowed(ws, records)
+        if allowed is not None:
+            records = [r for r in records if r.poem_id in allowed]
+            hits_a = [h for h in hits_a if h.poem_id in allowed]
+            hits_b = [h for h in hits_b if h.poem_id in allowed]
 
         if args.mode == "anchor":
             result = typed_coincidence(hits_a, hits_b, mode=MODE_ANCHOR)
@@ -353,6 +387,12 @@ def _ablate(args) -> dict:
         removed_poem_ids = {r.poem_id for r in records if r.poet_slug == removed_slug}
         hits_a = census_from_index(conn, records, _anchors_for(ws, addr_a))
         hits_b = census_from_index(conn, records, _anchors_for(ws, addr_b))
+        allowed = _scope_allowed(ws, records)
+        if allowed is not None:
+            removed_poem_ids &= allowed
+            records = [r for r in records if r.poem_id in allowed]
+            hits_a = [h for h in hits_a if h.poem_id in allowed]
+            hits_b = [h for h in hits_b if h.poem_id in allowed]
 
         if args.mode == "anchor":
             result = ablation_retention(hits_a, hits_b, MODE_ANCHOR, removed_poem_ids)
@@ -378,6 +418,10 @@ def _compare(args) -> dict:
     conn, records = _open_cached_index(args, ws)
     try:
         hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        allowed = _scope_allowed(ws, records)
+        if allowed is not None:
+            records = [r for r in records if r.poem_id in allowed]
+            hits = [h for h in hits if h.poem_id in allowed]
         hit_poems = {h.poem_id for h in hits} if args.mode == "anchor" else _accepted_or_raise(ws, args.object, hits)
         field_a, field_b = args.fields
         slug_a, slug_b = field_a[len("poet:"):], field_b[len("poet:"):]

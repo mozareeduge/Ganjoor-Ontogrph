@@ -171,6 +171,26 @@ def all_poems() -> ScopeSpec:
     return ScopeSpec(kind="all")
 
 
+def scope_from_dict(data: dict) -> ScopeSpec:
+    """Reconstruct a ScopeSpec from its `dataclasses.asdict` JSON form --
+    the exact shape `ontograph field build` writes to `field/scope.json`
+    (ledger row P9.4: that file must be readable back as a real filter,
+    not written and never read again). Unknown kinds raise, never
+    silently resolve to nothing."""
+    kind = data["kind"]
+    if kind in ("all", "none"):
+        return ScopeSpec(kind=kind)
+    if kind == "poet":
+        return ScopeSpec(kind="poet", poet_slug=data["poet_slug"])
+    if kind in ("union", "intersect", "difference"):
+        return ScopeSpec(
+            kind=kind,
+            left=scope_from_dict(data["left"]),
+            right=scope_from_dict(data["right"]),
+        )
+    raise ValueError(f"unknown ScopeSpec kind in stored scope: {kind!r}")
+
+
 def poet(slug: str) -> ScopeSpec:
     return ScopeSpec(kind="poet", poet_slug=slug)
 

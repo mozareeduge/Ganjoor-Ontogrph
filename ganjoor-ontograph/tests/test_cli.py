@@ -306,3 +306,70 @@ def test_malformed_field_spec_category_rejected(tmp_path, capsys):
     assert code != 0
     assert "category" in captured.err.lower()
     assert captured.out == ""
+
+
+# --- P9.4: field/scope.json is a real filter other verbs respect ---
+# Regression: a field scoped to sample1 must make an object that exists
+# corpus-wide (garden/باغ — present ONLY in sample2's poem 9202) return
+# 0 hits inside the scoped study, while an unscoped study still sees it.
+
+def test_p94_scope_filters_census_to_the_stored_field(tmp_path, capsys):
+    ws_dir = tmp_path / "ontograph-workspaces"
+
+    # P9.1 flow stays intact: stored root, no explicit flags below
+    code, _ = _run(capsys, [
+        "study", "new", "garden-study", "--corpus-root", FIXTURE_ROOT,
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+
+    code, out = _run(capsys, [
+        "field", "build", "garden-study", "--poet", "sample1",
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    assert json.loads(out)["poem_count"] == 7  # sample1's 7 poems
+
+    scope = json.loads(
+        (ws_dir / "garden-study" / "field" / "scope.json").read_text(encoding="utf-8")
+    )
+    assert scope["kind"] == "poet" and scope["poet_slug"] == "sample1"
+
+    code, _ = _run(capsys, [
+        "object", "add", "garden-study", "--label", "garden", "--address", "garden",
+        "--anchor", "باغ", "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+
+    # garden exists only in sample2's poems — outside this study's field
+    code, out = _run(capsys, [
+        "census", "garden-study", "--object", "garden",
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    result = json.loads(out)
+    assert result["hit_count"] == 0 and result["poem_count"] == 0 and result["poems"] == []
+
+    # ...but the object is real corpus-wide: an unscoped study sees it
+    _run(capsys, ["study", "new", "unscoped", "--corpus-root", FIXTURE_ROOT,
+                  "--workspaces-dir", str(ws_dir)])
+    _run(capsys, ["object", "add", "unscoped", "--label", "garden", "--address", "garden",
+                  "--anchor", "باغ", "--workspaces-dir", str(ws_dir)])
+    code, out = _run(capsys, [
+        "census", "unscoped", "--object", "garden",
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    result = json.loads(out)
+    assert result["hit_count"] > 0 and 9202 in result["poems"]
+
+    # an all-poems scope (field build with no --poet) changes nothing
+    _run(capsys, ["field", "build", "unscoped", "--corpus-root", FIXTURE_ROOT,
+                  "--workspaces-dir", str(ws_dir)])
+    code, out = _run(capsys, [
+        "census", "unscoped", "--object", "garden",
+        "--workspaces-dir", str(ws_dir), "--json",
+    ])
+    assert code == 0
+    result_all = json.loads(out)
+    assert result_all == result  # identical numbers, scope=all is a no-op

@@ -68,3 +68,30 @@ def test_poet_life_proxy_700_800_ah_matches_sample1_and_sample2_only():
     matched_slugs = {r.poet_slug for r in records if r.poem_id in poem_ids}
     assert matched_slugs == {"sample1", "sample2"}
     assert charter.poem_count(records) == 12  # 7 (sample1) + 5 (sample2)
+
+
+# --- P9.4: field/scope.json roundtrip (written by `field build`, read
+# back by the other verbs as a real filter) ---
+
+def test_scope_from_dict_roundtrips_every_kind():
+    from dataclasses import asdict
+    from ontograph.field import ScopeSpec, intersect, scope_from_dict
+
+    specs = [
+        all_poems(),
+        poet("sample1"),
+        union(poet("sample1"), poet("sample2")),
+        difference(all_poems(), poet("sample3")),
+        intersect(poet("sample1"), poet("sample2")),
+        ScopeSpec(kind="none"),
+    ]
+    for spec in specs:
+        assert scope_from_dict(asdict(spec)) == spec
+
+
+def test_scope_from_dict_rejects_unknown_kind():
+    import pytest
+    from ontograph.field import scope_from_dict
+
+    with pytest.raises(ValueError):
+        scope_from_dict({"kind": "category", "poet_slug": None})
