@@ -37,7 +37,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from ontograph.ablation import ablation_retention
-from ontograph.anchors import LexicalAnchor, census as run_census
+from ontograph.anchors import LexicalAnchor
 from ontograph.census import (
     OccurrenceAssessment,
     accepted_poem_ids,
@@ -47,7 +47,12 @@ from ontograph.census import (
     open_context_ladder,
 )
 from ontograph.compare import MODE_ANCHOR, MODE_ASSESSED, InsufficientSupportError, compare_fields, lift, typed_coincidence
-from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet, scan_corpus
+from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet
+from ontograph.index_cache import (
+    census_from_index,
+    get_or_build_index,
+    records_from_index,
+)
 from ontograph.metrics import spread
 from ontograph.release import DATA_LICENSE_NOTICE, generate_release, release_as_git_tag
 from ontograph.workspace import new_study, read_study_config
@@ -134,6 +139,18 @@ def _resolve_corpus_root(args, ws: Path) -> str:
     )
 
 
+def _open_cached_index(args, ws: Path):
+    """Ledger row P9.3: every corpus verb serves its records and census
+    hits from the corpus-root-keyed index cache (P9.2, built once via the
+    proven `corpus.build_index()`) instead of a full `scan_corpus()` +
+    re-parse/re-tokenize per invocation. The connection is read-only; the
+    caller closes it (`conn.close()`) before returning."""
+    corpus_root = _resolve_corpus_root(args, ws)
+    conn, _manifest, _cache_hit = get_or_build_index(corpus_root)
+    records = records_from_index(conn)
+    return conn, records
+
+
 def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
     assessments = _load_assessments(ws, object_address)
     if not assessments:
@@ -163,14 +180,17 @@ def _field_build(args) -> dict:
             "leaf kind yet); use --poet or omit both for the full field"
         )
     corpus_root = _resolve_corpus_root(args, ws)
-    records = scan_corpus(corpus_root)
-    scope: ScopeSpec = poet(args.poet) if args.poet else all_poems()
-    charter = FieldCharter(
-        purpose=f"field for study {args.study_id}",
-        corpus_snapshot=str(corpus_root),
-        scope_spec=scope,
-    )
-    poem_ids = sorted(charter.poem_ids(records))
+    conn, records = _open_cached_index(args, ws)
+    try:
+        scope: ScopeSpec = poet(args.poet) if args.poet else all_poems()
+        charter = FieldCharter(
+            purpose=f"field for study {args.study_id}",
+            corpus_snapshot=str(corpus_root),
+            scope_spec=scope,
+        )
+        poem_ids = sorted(charter.poem_ids(records))
+    finally:
+        conn.close()
     (ws / "field" / "scope.json").write_text(
         json.dumps(asdict(scope), ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -223,34 +243,38 @@ def _assess(args) -> dict:
 
 def _calibrate(args) -> dict:
     ws = _require_workspace(args)
-    corpus_root = _resolve_corpus_root(args, ws)
-    records = scan_corpus(corpus_root)
-    records_by_id = {r.poem_id: r for r in records}
-    hits = run_census(records, _anchors_for(ws, args.object))
-    sample = calibration_sample(hits, sample_size=args.sample, seed=args.seed)
-    context = [open_context_ladder(h, records_by_id[h.poem_id].path) for h in sample]
+    conn, records = _open_cached_index(args, ws)
+    try:
+        records_by_id = {r.poem_id: r for r in records}
+        hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        sample = calibration_sample(hits, sample_size=args.sample, seed=args.seed)
+        context = [open_context_ladder(h, records_by_id[h.poem_id].path) for h in sample]
+    finally:
+        conn.close()
     return {"object_address": args.object, "sample_size": len(sample), "context": context}
 
 
 def _census(args) -> dict:
     ws = _require_workspace(args)
-    corpus_root = _resolve_corpus_root(args, ws)
-    records = scan_corpus(corpus_root)
-    hits = run_census(records, _anchors_for(ws, args.object))
-    if args.mode == "anchor":
-        poems = sorted({h.poem_id for h in hits})
-        return {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
+    conn, records = _open_cached_index(args, ws)
+    try:
+        hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        if args.mode == "anchor":
+            poems = sorted({h.poem_id for h in hits})
+            return {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
 
-    assessments = _load_assessments(ws, args.object)
-    if not assessments:
-        raise CLIError(
-            f"no assessments recorded for object {args.object!r} -- "
-            f"run 'ontograph assess' first, or use --mode anchor"
-        )
-    all_poem_ids = {r.poem_id for r in records}
-    accepted = accepted_poem_ids(hits, assessments)
-    ambiguous_only = ambiguous_only_poem_ids(hits, assessments)
-    prevalence = assessed_full_prevalence(all_poem_ids, hits, assessments)
+        assessments = _load_assessments(ws, args.object)
+        if not assessments:
+            raise CLIError(
+                f"no assessments recorded for object {args.object!r} -- "
+                f"run 'ontograph assess' first, or use --mode anchor"
+            )
+        all_poem_ids = {r.poem_id for r in records}
+        accepted = accepted_poem_ids(hits, assessments)
+        ambiguous_only = ambiguous_only_poem_ids(hits, assessments)
+        prevalence = assessed_full_prevalence(all_poem_ids, hits, assessments)
+    finally:
+        conn.close()
     return {
         "object_address": args.object, "mode": "assessed",
         "numerator": prevalence.numerator, "denominator": prevalence.denominator,
@@ -263,14 +287,16 @@ def _map_recurrence(args) -> dict:
     if args.unit != "poem":
         raise CLIError(f"unsupported --unit {args.unit!r} in v0.1 (only 'poem' is implemented)")
     ws = _require_workspace(args)
-    corpus_root = _resolve_corpus_root(args, ws)
-    records = scan_corpus(corpus_root)
-    hits = run_census(records, _anchors_for(ws, args.object))
-    if args.mode == "anchor":
-        poems_with_object = {h.poem_id for h in hits}
-    else:
-        poems_with_object = _accepted_or_raise(ws, args.object, hits)
-    s = spread(poems_with_object, records)
+    conn, records = _open_cached_index(args, ws)
+    try:
+        hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        if args.mode == "anchor":
+            poems_with_object = {h.poem_id for h in hits}
+        else:
+            poems_with_object = _accepted_or_raise(ws, args.object, hits)
+        s = spread(poems_with_object, records)
+    finally:
+        conn.close()
     return {
         "object_address": args.object, "mode": args.mode, "unit": "poem",
         "distinct_poems": s.distinct_poems, "distinct_poets": s.distinct_poets,
@@ -280,32 +306,34 @@ def _map_recurrence(args) -> dict:
 
 def _companions(args) -> dict:
     ws = _require_workspace(args)
-    corpus_root = _resolve_corpus_root(args, ws)
-    records = scan_corpus(corpus_root)
-    hits_a = run_census(records, _anchors_for(ws, args.object))
-    hits_b = run_census(records, _anchors_for(ws, args.with_))
-
-    if args.mode == "anchor":
-        result = typed_coincidence(hits_a, hits_b, mode=MODE_ANCHOR)
-        poems_a = {h.poem_id for h in hits_a}
-        poems_b = {h.poem_id for h in hits_b}
-    else:
-        accepted_a = _accepted_or_raise(ws, args.object, hits_a)
-        accepted_b = _accepted_or_raise(ws, args.with_, hits_b)
-        result = typed_coincidence(hits_a, hits_b, mode=MODE_ASSESSED, accepted_a=accepted_a, accepted_b=accepted_b)
-        poems_a, poems_b = accepted_a, accepted_b
-
-    out = {
-        "object_address": args.object, "with": args.with_, "mode": args.mode, "scale": args.scale,
-        "poem_scale": sorted(result.poem_scale),
-        "couplet_scale": sorted(list(t) for t in result.couplet_scale),
-    }
+    conn, records = _open_cached_index(args, ws)
     try:
-        lift_result = lift(poems_a, poems_b, field_size=len(records), minimum_support=args.min_support)
-        out["lift"] = asdict(lift_result)
-    except InsufficientSupportError as e:
-        out["lift"] = None
-        out["lift_note"] = str(e)
+        hits_a = census_from_index(conn, records, _anchors_for(ws, args.object))
+        hits_b = census_from_index(conn, records, _anchors_for(ws, args.with_))
+
+        if args.mode == "anchor":
+            result = typed_coincidence(hits_a, hits_b, mode=MODE_ANCHOR)
+            poems_a = {h.poem_id for h in hits_a}
+            poems_b = {h.poem_id for h in hits_b}
+        else:
+            accepted_a = _accepted_or_raise(ws, args.object, hits_a)
+            accepted_b = _accepted_or_raise(ws, args.with_, hits_b)
+            result = typed_coincidence(hits_a, hits_b, mode=MODE_ASSESSED, accepted_a=accepted_a, accepted_b=accepted_b)
+            poems_a, poems_b = accepted_a, accepted_b
+
+        out = {
+            "object_address": args.object, "with": args.with_, "mode": args.mode, "scale": args.scale,
+            "poem_scale": sorted(result.poem_scale),
+            "couplet_scale": sorted(list(t) for t in result.couplet_scale),
+        }
+        try:
+            lift_result = lift(poems_a, poems_b, field_size=len(records), minimum_support=args.min_support)
+            out["lift"] = asdict(lift_result)
+        except InsufficientSupportError as e:
+            out["lift"] = None
+            out["lift_note"] = str(e)
+    finally:
+        conn.close()
     return out
 
 
@@ -320,21 +348,23 @@ def _ablate(args) -> dict:
     if not addr_a or not addr_b:
         raise CLIError("--rerun relation spec must be 'relation:<addr-a>-<addr-b>'")
 
-    corpus_root = _resolve_corpus_root(args, ws)
-    records = scan_corpus(corpus_root)
-    removed_poem_ids = {r.poem_id for r in records if r.poet_slug == removed_slug}
-    hits_a = run_census(records, _anchors_for(ws, addr_a))
-    hits_b = run_census(records, _anchors_for(ws, addr_b))
+    conn, records = _open_cached_index(args, ws)
+    try:
+        removed_poem_ids = {r.poem_id for r in records if r.poet_slug == removed_slug}
+        hits_a = census_from_index(conn, records, _anchors_for(ws, addr_a))
+        hits_b = census_from_index(conn, records, _anchors_for(ws, addr_b))
 
-    if args.mode == "anchor":
-        result = ablation_retention(hits_a, hits_b, MODE_ANCHOR, removed_poem_ids)
-    else:
-        accepted_a = _accepted_or_raise(ws, addr_a, hits_a)
-        accepted_b = _accepted_or_raise(ws, addr_b, hits_b)
-        result = ablation_retention(
-            hits_a, hits_b, MODE_ASSESSED, removed_poem_ids,
-            accepted_a=accepted_a, accepted_b=accepted_b,
-        )
+        if args.mode == "anchor":
+            result = ablation_retention(hits_a, hits_b, MODE_ANCHOR, removed_poem_ids)
+        else:
+            accepted_a = _accepted_or_raise(ws, addr_a, hits_a)
+            accepted_b = _accepted_or_raise(ws, addr_b, hits_b)
+            result = ablation_retention(
+                hits_a, hits_b, MODE_ASSESSED, removed_poem_ids,
+                accepted_a=accepted_a, accepted_b=accepted_b,
+            )
+    finally:
+        conn.close()
     return {"removed": args.remove, "relation": f"{addr_a}-{addr_b}", "mode": args.mode, **asdict(result)}
 
 
@@ -345,15 +375,17 @@ def _compare(args) -> dict:
     for f in args.fields:
         if not f.startswith("poet:"):
             raise CLIError("unsupported --field spec in v0.1 (only 'poet:<slug>' is implemented)")
-    corpus_root = _resolve_corpus_root(args, ws)
-    records = scan_corpus(corpus_root)
-    hits = run_census(records, _anchors_for(ws, args.object))
-    hit_poems = {h.poem_id for h in hits} if args.mode == "anchor" else _accepted_or_raise(ws, args.object, hits)
-    field_a, field_b = args.fields
-    slug_a, slug_b = field_a[len("poet:"):], field_b[len("poet:"):]
-    poems_a = {r.poem_id for r in records if r.poet_slug == slug_a}
-    poems_b = {r.poem_id for r in records if r.poet_slug == slug_b}
-    result = compare_fields(hit_poems & poems_a, len(poems_a), hit_poems & poems_b, len(poems_b))
+    conn, records = _open_cached_index(args, ws)
+    try:
+        hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        hit_poems = {h.poem_id for h in hits} if args.mode == "anchor" else _accepted_or_raise(ws, args.object, hits)
+        field_a, field_b = args.fields
+        slug_a, slug_b = field_a[len("poet:"):], field_b[len("poet:"):]
+        poems_a = {r.poem_id for r in records if r.poet_slug == slug_a}
+        poems_b = {r.poem_id for r in records if r.poet_slug == slug_b}
+        result = compare_fields(hit_poems & poems_a, len(poems_a), hit_poems & poems_b, len(poems_b))
+    finally:
+        conn.close()
     return {"object_address": args.object, "mode": args.mode, "field_a": field_a, "field_b": field_b, **asdict(result)}
 
 
