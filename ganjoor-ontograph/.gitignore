@@ -2,3 +2,8 @@
 build/
 dist/
 .venv/
+
+# Claude Code harness runtime state (ephemeral; this whole .claude/ dir is
+# state-only — the project's real skills/settings live in the repo root's
+# tracked .claude/)
+.claude/

@@ -12,3 +12,9 @@ __pycache__/
 
 # OS junk
 .DS_Store
+
+# Claude Code harness runtime state (ephemeral: session leases, active-session
+# registry, instruction cache) — harness-managed, never project artifacts.
+# Kept on disk (the harness rewrites them live); kept out of git.
+.claude/sessions/
+.claude/state/
