@@ -3,6 +3,8 @@
   "Name": "شاعر آزمایشی دو",
   "Nickname": "آزمایشی۲",
   "Description": "Fabricated fixture poet, not a real historical figure.",
-  "BirthYearLunarHijri": 750,
-  "DeathYearLunarHijri": 820
+  "BirthYearInLHijri": 750,
+  "DeathYearInLHijri": 820,
+  "ValidBirthDate": true,
+  "ValidDeathDate": true
 }

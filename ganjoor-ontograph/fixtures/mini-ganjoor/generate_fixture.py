@@ -80,7 +80,7 @@ POEMS = {}
 #     "dominant source" for the tight-scale relation. ---
 POETS["sample1"] = {"Id": 9001, "Name": "شاعر آزمایشی یک", "Nickname": "آزمایشی۱",
                      "Description": "Fabricated fixture poet, not a real historical figure.",
-                     "BirthYearLunarHijri": 705, "DeathYearLunarHijri": 780}
+                     "BirthYearInLHijri": 705, "DeathYearInLHijri": 780, "ValidBirthDate": True, "ValidDeathDate": True}
 
 POEMS[9101] = poem(9101, 1, "غزل آزمایشی ۱-۱",
     [(f"{MIRROR} در دست من است امشب", f"{RUST} بر آن نشسته پنهان"),
@@ -134,7 +134,7 @@ POEMS[9107] = poem(9107, 1, "غزل آزمایشی ۱-۷",
 #     entirely — a more realistic ablation fixture than a 0% collapse. ---
 POETS["sample2"] = {"Id": 9002, "Name": "شاعر آزمایشی دو", "Nickname": "آزمایشی۲",
                      "Description": "Fabricated fixture poet, not a real historical figure.",
-                     "BirthYearLunarHijri": 750, "DeathYearLunarHijri": 820}
+                     "BirthYearInLHijri": 750, "DeathYearInLHijri": 820, "ValidBirthDate": True, "ValidDeathDate": True}
 
 POEMS[9201] = poem(9201, 2, "غزل آزمایشی ۲-۱",
     [(f"{MIRROR} و {RUST} در یک نفس", "با هم به دست باد سپردیم")],
@@ -163,7 +163,7 @@ POEMS[9205] = poem(9205, 2, "غزل آزمایشی ۲-۵",
 #     units contributing zero, not silently dropped from the field. ---
 POETS["sample3"] = {"Id": 9003, "Name": "شاعر آزمایشی سه", "Nickname": "آزمایشی۳",
                      "Description": "Fabricated fixture poet, not a real historical figure.",
-                     "BirthYearLunarHijri": 850, "DeathYearLunarHijri": 910}
+                     "BirthYearInLHijri": 850, "DeathYearInLHijri": 910, "ValidBirthDate": True, "ValidDeathDate": True}
 
 for i, text in enumerate([
     "باران بهاری بر بام",
@@ -189,7 +189,7 @@ for i, text in enumerate([
 POETS["sample4"] = {"Id": 9004, "Name": "شاعر آزمایشی چهار", "Nickname": "آزمایشی۴",
                      "Description": "Fabricated fixture poet, not a real historical figure. "
                                      "Exists to give the HEART object a realistic hit count.",
-                     "BirthYearLunarHijri": 600, "DeathYearLunarHijri": 655}
+                     "BirthYearInLHijri": 600, "DeathYearInLHijri": 655, "ValidBirthDate": True, "ValidDeathDate": True}
 
 # Every verse below contains exactly one HEART token and no other tracked
 # object (mirror/rust) — deliberately uniform so the per-poem count (4) and

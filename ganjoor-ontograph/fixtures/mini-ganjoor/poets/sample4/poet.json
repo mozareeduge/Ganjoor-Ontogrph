@@ -3,6 +3,8 @@
   "Name": "شاعر آزمایشی چهار",
   "Nickname": "آزمایشی۴",
   "Description": "Fabricated fixture poet, not a real historical figure. Exists to give the HEART object a realistic hit count.",
-  "BirthYearLunarHijri": 600,
-  "DeathYearLunarHijri": 655
+  "BirthYearInLHijri": 600,
+  "DeathYearInLHijri": 655,
+  "ValidBirthDate": true,
+  "ValidDeathDate": true
 }

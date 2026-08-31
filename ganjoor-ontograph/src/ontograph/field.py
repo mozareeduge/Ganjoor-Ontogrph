@@ -31,9 +31,25 @@ class PoetRecord:
     slug: str
     birth_year_lunar_hijri: int | None
     death_year_lunar_hijri: int | None
+    # the real corpus's own uncertainty flags (Phase 8 finding, P1.4
+    # follow-up): a poet.json can carry a birth/death year that Ganjoor
+    # itself marks estimated rather than certified. Exposed here, not yet
+    # factored into `poet_life_overlaps_hijri_range()`'s matching logic --
+    # that is a methodological call (should an estimated boundary still
+    # count as a known one?) left for whoever next uses this field, not
+    # silently decided here.
+    valid_birth_date: bool | None = None
+    valid_death_date: bool | None = None
 
 
 def scan_poets(root: str | Path) -> list[PoetRecord]:
+    """Real-corpus finding (Phase 8): the vendored corpus's poet.json uses
+    `BirthYearInLHijri`/`DeathYearInLHijri` (plus `ValidBirthDate`/
+    `ValidDeathDate` booleans) -- NOT `BirthYearLunarHijri`/
+    `DeathYearLunarHijri`, which only the fixture (a naming error from
+    P1.4, now corrected there too) ever used. Against the real corpus the
+    old field names silently returned None for every poet, breaking the
+    poet-life chronological proxy (spec §11/§23.2) with no error at all."""
     root = Path(root)
     poets: list[PoetRecord] = []
     for poet_json in sorted(root.glob("poets/*/poet.json")):
@@ -42,8 +58,10 @@ def scan_poets(root: str | Path) -> list[PoetRecord]:
             PoetRecord(
                 poet_id=data["Id"],
                 slug=poet_json.parent.name,
-                birth_year_lunar_hijri=data.get("BirthYearLunarHijri"),
-                death_year_lunar_hijri=data.get("DeathYearLunarHijri"),
+                birth_year_lunar_hijri=data.get("BirthYearInLHijri"),
+                death_year_lunar_hijri=data.get("DeathYearInLHijri"),
+                valid_birth_date=data.get("ValidBirthDate"),
+                valid_death_date=data.get("ValidDeathDate"),
             )
         )
     return poets

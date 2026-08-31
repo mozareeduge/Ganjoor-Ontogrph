@@ -3,6 +3,8 @@
   "Name": "شاعر آزمایشی سه",
   "Nickname": "آزمایشی۳",
   "Description": "Fabricated fixture poet, not a real historical figure.",
-  "BirthYearLunarHijri": 850,
-  "DeathYearLunarHijri": 910
+  "BirthYearInLHijri": 850,
+  "DeathYearInLHijri": 910,
+  "ValidBirthDate": true,
+  "ValidDeathDate": true
 }
