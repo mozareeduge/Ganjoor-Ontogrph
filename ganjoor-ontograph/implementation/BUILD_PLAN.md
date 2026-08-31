@@ -118,6 +118,27 @@ verifiable ledger row, and an unattended loop declaring it "done" on its
 own would be exactly the kind of self-certification EXTERNAL_REVIEW.md
 warned against.
 
+### Phase 9 — Usability & methodology hardening (guided, outside the loop)
+
+Also not part of the automated ledger, for a different reason than Phase 8:
+this phase exists because the user tested the finished v0.1 apparatus
+themselves and found real friction and a real methodological gap no
+fixture-driven test could catch (see `IMPLEMENTATION_LEDGER.md`'s own Phase
+9 section for the full diagnosis and the two design decisions binding on
+it). Two dependency chains — infrastructure (a study remembers its own
+corpus root; the SQLite index Phase 1 already built gets actually used
+instead of every CLI call re-scanning the whole corpus from scratch; a
+built Field Charter's scope actually constrains later operations, which it
+currently does not) and methodology (a real guided calibration/assessment
+flow, since the test session's entire analysis ran on raw anchor hits with
+zero calibration — exactly the Anchor Hit ≠ object occurrence collapse the
+apparatus exists to prevent — plus an actual Research Release rendering
+path, since none existed and a generic charting skill had to be improvised
+from scratch both times this was tried). Chain B is design work, not just
+implementation — the calibration flow's shape is a UX decision the user
+has asked to review before another round of their own testing, which is
+why this phase is explicitly excluded from `/loop /ontograph-build`.
+
 ## Definition of done for v0.1
 
 All Phase 0–7 ledger rows `done`, and re-running the Phase 7 gate check
