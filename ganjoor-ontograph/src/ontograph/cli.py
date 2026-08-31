@@ -257,6 +257,19 @@ def _assess(args) -> dict:
     }
 
 
+from ontograph.walk import run_walk
+
+
+def _walk(args) -> dict:
+    ws = _require_workspace(args)
+    corpus_root = _resolve_corpus_root(args, ws)
+    return run_walk(
+        ws=ws, study_id=args.study_id, object_address=args.object,
+        corpus_root=corpus_root, sample_size=args.sample, seed=args.seed,
+        script_path=args.script, assessor=args.assessor,
+    )
+
+
 def _calibrate(args) -> dict:
     ws = _require_workspace(args)
     conn, records = _open_cached_index(args, ws)
@@ -525,6 +538,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = top.add_parser("release", parents=[common]); p.add_argument("study_id")
     p.add_argument("--version", required=True); p.set_defaults(func=_release)
+
+    # Ledger row P9.5: the guided calibration/assessment flow. Scripted
+    # (--script JSON) or interactive TTY; never a silent non-interactive run.
+    p = top.add_parser("walk", parents=[with_corpus]); p.add_argument("study_id")
+    p.add_argument("--object", required=True)
+    p.add_argument("--sample", type=int, default=30)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--script"); p.add_argument("--assessor", default="human")
+    p.set_defaults(func=_walk)
 
     p = top.add_parser("validate", parents=[with_corpus])
     p.add_argument("--gates", action="store_true"); p.add_argument("--repo-root", required=True)
