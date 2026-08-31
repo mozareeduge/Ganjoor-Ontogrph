@@ -464,7 +464,14 @@ def _release(args) -> dict:
         field_charter=field_charter, data_license_notice=DATA_LICENSE_NOTICE,
     )
     tag = release_as_git_tag(ws, args.version)
-    return {"release_id": release.id, "version": release.version, "tag": tag}
+    # Ledger row P9.8: every release renders report.md + report.html by
+    # default (the researcher's binding format decision); other formats
+    # only on explicit request, so none are offered here.
+    from ontograph.report import render_release_reports
+
+    rendered = render_release_reports(ws, args.version)
+    return {"release_id": release.id, "version": release.version, "tag": tag,
+            "report_markdown": rendered["markdown"], "report_html": rendered["html"]}
 
 
 # --- argument parsing ---
