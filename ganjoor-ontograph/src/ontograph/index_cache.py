@@ -205,11 +205,27 @@ def census_from_index(conn, records: list[PoemRecord], anchors: list[LexicalAnch
     `scan_corpus` order; within a poem, verse order then token_index
     order; within a token, `forms_by_object` insertion order."""
     approved = [a for a in anchors if a.status == "approved"]
-    forms_by_object: dict[str, set[str]] = {}
-    for a in approved:
-        forms_by_object.setdefault(a.object_address, set()).add(normalize(a.form).normalized)
+    # T02: mode-aware anchors, validated up front, identical dispatch to
+    # anchors.census (exact by token IN; phrase by ordered n-gram over a
+    # verse's tokens, reconstructed from token_index ordering).
+    from ontograph.anchors import resolve_auto_mode, validate_anchor_form
 
-    all_forms = sorted({f for forms in forms_by_object.values() for f in forms})
+    exact_by_object: dict[str, set[str]] = {}
+    phrase_by_object: dict[str, list[list[str]]] = {}
+    for a in approved:
+        mode = a.match_mode
+        if mode == "auto":
+            mode = resolve_auto_mode(a.form)
+        normalized_form = validate_anchor_form(a.form, mode)
+        if mode == "phrase":
+            phrase_by_object.setdefault(a.object_address, []).append(normalized_form.split())
+        else:
+            exact_by_object.setdefault(a.object_address, set()).add(normalized_form)
+
+    all_forms = sorted(
+        {f for forms in exact_by_object.values() for f in forms}
+        | {tok for lists in phrase_by_object.values() for toks in lists for tok in toks}
+    )
     hits_by_poem: dict[int, list[AnchorHit]] = {}
     if all_forms:
         placeholders = ",".join("?" for _ in all_forms)
@@ -224,23 +240,58 @@ def census_from_index(conn, records: list[PoemRecord], anchors: list[LexicalAnch
             "ORDER BY t.poem_id, t.vorder, t.token_index",
             all_forms,
         ).fetchall()
-        for (poem_id, _vorder, token_index, token_text, start, end,
-             couplet_index, position, text, normalized_text) in rows:
-            for object_address, forms in forms_by_object.items():
-                if token_text in forms:
-                    hits_by_poem.setdefault(poem_id, []).append(
-                        AnchorHit(
+        # Group rows per (poem_id, vorder) so phrase n-grams can be found
+        # on the same ordered token stream the scan path tokenizes.
+        rows_by_verse: dict[tuple[int, int], list[tuple]] = {}
+        for row in rows:
+            rows_by_verse.setdefault((row[0], row[1]), []).append(row)
+
+        def _emit(hit: AnchorHit) -> None:
+            hits_by_poem.setdefault(hit.poem_id, []).append(hit)
+
+        for (poem_id, vorder), vrows in rows_by_verse.items():
+            _couplet_index = vrows[0][6]
+            _position = vrows[0][7]
+            _text = vrows[0][8]
+            _ntext = vrows[0][9]
+            # exact pass (per-token, scan-identical ordering)
+            for row in vrows:
+                token_text, start, end = row[3], row[4], row[5]
+                for object_address, forms in exact_by_object.items():
+                    if token_text in forms:
+                        _emit(AnchorHit(
                             object_address=object_address,
                             lexical_anchor=token_text,
                             poem_id=poem_id,
-                            couplet_index=couplet_index,
-                            position=position,
-                            original_text=text,
-                            normalized_text=normalized_text,
+                            couplet_index=_couplet_index,
+                            position=_position,
+                            original_text=_text,
+                            normalized_text=_ntext,
                             token_start=start,
                             token_end=end,
-                        )
-                    )
+                        ))
+            # T02 phrase pass: ordered n-grams within this verse. Note a
+            # subtlety: rows here only contain tokens matching some form
+            # of some anchor; a phrase whose middle token matches no
+            # anchor would be invisible. That is impossible in this
+            # query because every phrase token IS in all_forms.
+            toks = [(r[3], r[4], r[5]) for r in vrows]  # already token_index-ordered
+            for object_address, phrase_lists in phrase_by_object.items():
+                for phrase_tokens in phrase_lists:
+                    n = len(phrase_tokens)
+                    for i in range(len(toks) - n + 1):
+                        if [toks[i + j][0] for j in range(n)] == phrase_tokens:
+                            _emit(AnchorHit(
+                                object_address=object_address,
+                                lexical_anchor=" ".join(phrase_tokens),
+                                poem_id=poem_id,
+                                couplet_index=_couplet_index,
+                                position=_position,
+                                original_text=_text,
+                                normalized_text=_ntext,
+                                token_start=toks[i][1],
+                                token_end=toks[i + n - 1][2],
+                            ))
 
     hits: list[AnchorHit] = []
     for record in records:  # scan_corpus ordering, per poem

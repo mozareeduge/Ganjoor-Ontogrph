@@ -19,7 +19,60 @@ from dataclasses import dataclass
 from ontograph.field import PoemRecord
 from ontograph.normalize import NORMALIZATION_PROFILE_VERSION, TOKENIZER_VERSION, normalize, tokenize
 
-MATCHER_VERSION = "1.0.0"
+MATCHER_VERSION = "1.1.0"  # T02: phrase n-gram matching added
+
+VALID_MATCH_MODES = ("exact", "phrase", "regex", "normalized", "auto")
+
+
+def validate_anchor_form(form: str, match_mode: str) -> str:
+    """Validate an anchor form against its declared match mode (T02).
+
+    - form must be non-empty after normalization;
+    - `regex` is v0.2 opt-in only (spec §6.2) and is rejected here until
+      that row lands -- never silently treated as another mode;
+    - an `exact` anchor whose NORMALIZED form contains whitespace is a
+      construction error: the pre-T02 engine silently matched nothing in
+      that case (token-exact matching can never hit a multi-token form),
+      and silent zero for an unsupported matcher is forbidden;
+    - returns the normalized form so callers persist it once."""
+    if match_mode not in VALID_MATCH_MODES:
+        raise ValueError(f"unsupported match_mode: {match_mode!r}")
+    if match_mode == "regex":
+        raise ValueError("match_mode 'regex' is v0.2 opt-in and not yet supported")
+    normalized = normalize(form).normalized
+    if not normalized.strip():
+        raise ValueError("anchor form is empty after normalization")
+    if match_mode == "exact" and " " in normalized:
+        raise ValueError(
+            f"exact anchor form {form!r} normalizes to multi-token {normalized!r}; "
+            "use match_mode='phrase' (a silent no-match is forbidden)"
+        )
+    return normalized
+
+
+def resolve_auto_mode(form: str) -> str:
+    """`auto` CLI inference (spec §6.2): one normalized token -> exact;
+    multiple tokens (whitespace-separated) -> phrase."""
+    normalized = normalize(form).normalized
+    return "exact" if " " not in normalized else "phrase"
+
+
+def _phrase_token_spans(
+    tokens: list[tuple[str, int, int]], phrase_tokens: list[str]
+) -> list[tuple[int, int]]:
+    """Ordered token n-gram matcher (T02 lock): all contiguous runs of
+    phrase_tokens inside `tokens`, as (start_token_idx, end_token_idx)
+    pairs INCLUSIVE. Overlapping runs are all returned (overlaps remain
+    separate hits). Matching never crosses verses because callers feed
+    one verse's tokens at a time."""
+    n = len(phrase_tokens)
+    if n == 0:
+        return []
+    spans = []
+    for i in range(len(tokens) - n + 1):
+        if [tokens[i + j][0] for j in range(n)] == phrase_tokens:
+            spans.append((i, i + n - 1))
+    return spans
 
 
 @dataclass(frozen=True)
@@ -63,12 +116,22 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
     # scale logic must exclude `None` from participating in couplet-scale
     # co-incidence (two unrelated Comment verses are not "the same couplet").
     approved = [a for a in anchors if a.status == "approved"]
-    forms_by_object: dict[str, set[str]] = {}
+    # T02: per-anchor normalized forms keyed by mode. exact anchors keep
+    # their single-token set; phrase anchors carry their ordered token
+    # list. Everything is validated up front -- an invalid form/mode
+    # fails BEFORE any corpus reading (spec §7: unsupported input fails
+    # before computation).
+    exact_by_object: dict[str, set[str]] = {}
+    phrase_by_object: dict[str, list[list[str]]] = {}
     for a in approved:
-        # normalize the anchor form itself so a caller-supplied form with,
-        # say, an Arabic Yeh variant still matches normalized tokens
-        normalized_form = normalize(a.form).normalized
-        forms_by_object.setdefault(a.object_address, set()).add(normalized_form)
+        mode = a.match_mode
+        if mode == "auto":
+            mode = resolve_auto_mode(a.form)
+        normalized_form = validate_anchor_form(a.form, mode)
+        if mode == "phrase":
+            phrase_by_object.setdefault(a.object_address, []).append(normalized_form.split())
+        else:  # exact (or the legacy `normalized` alias, emitted canonically as exact)
+            exact_by_object.setdefault(a.object_address, set()).add(normalized_form)
 
     hits: list[AnchorHit] = []
     for record in records:
@@ -78,7 +141,7 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
             nt = normalize(text)
             tokens = tokenize(nt.normalized)
             for token_text, start, end in tokens:
-                for object_address, forms in forms_by_object.items():
+                for object_address, forms in exact_by_object.items():
                     if token_text in forms:
                         hits.append(
                             AnchorHit(
@@ -91,6 +154,23 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
                                 normalized_text=nt.normalized,
                                 token_start=start,
                                 token_end=end,
+                            )
+                        )
+            # T02 phrase pass: ordered n-grams within THIS verse only
+            for object_address, phrase_lists in phrase_by_object.items():
+                for phrase_tokens in phrase_lists:
+                    for i, j in _phrase_token_spans(tokens, phrase_tokens):
+                        hits.append(
+                            AnchorHit(
+                                object_address=object_address,
+                                lexical_anchor=" ".join(phrase_tokens),
+                                poem_id=record.poem_id,
+                                couplet_index=verse.get("CoupletIndex"),
+                                position=verse["Position"],
+                                original_text=text,
+                                normalized_text=nt.normalized,
+                                token_start=tokens[i][1],
+                                token_end=tokens[j][2],
                             )
                         )
     return hits
