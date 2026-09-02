@@ -195,7 +195,10 @@ def records_from_index(conn) -> list[PoemRecord]:
     return records
 
 
-def census_from_index(conn, records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[AnchorHit]:
+def census_from_index(
+    conn, records: list[PoemRecord], anchors: list[LexicalAnchor],
+    corpus_snapshot_id: str | None = None,
+) -> list[AnchorHit]:
     """Token-level anchor census (spec §27.1) served from the cached
     index's token_offsets table instead of re-reading/re-tokenizing every
     poem JSON. Matching semantics are identical to `anchors.census`:
@@ -203,7 +206,15 @@ def census_from_index(conn, records: list[PoemRecord], anchors: list[LexicalAnch
     token-exact (never substring — the 9107 `آینه‌بند` guard must not
     regress). Hit ORDER is identical to `anchors.census` too: records in
     `scan_corpus` order; within a poem, verse order then token_index
-    order; within a token, `forms_by_object` insertion order."""
+    order; within a token, `forms_by_object` insertion order.
+
+    T04: hits carry verse_order (from the index's own vorder column) and
+    corpus_snapshot_id (derived from the records' root when omitted), so
+    hit IDs are identical to the scan path's."""
+    if corpus_snapshot_id is None and records:
+        from ontograph.corpus import corpus_snapshot as _cs
+
+        corpus_snapshot_id = _cs(records[0].path.parents[3]).snapshot_id
     approved = [a for a in anchors if a.status == "approved"]
     # T02: mode-aware anchors, validated up front, identical dispatch to
     # anchors.census (exact by token IN; phrase by ordered n-gram over a
@@ -269,6 +280,8 @@ def census_from_index(conn, records: list[PoemRecord], anchors: list[LexicalAnch
                             normalized_text=_ntext,
                             token_start=start,
                             token_end=end,
+                            verse_order=vorder,
+                            corpus_snapshot_id=corpus_snapshot_id,
                         ))
             # T02 phrase pass: ordered n-grams within this verse. Note a
             # subtlety: rows here only contain tokens matching some form
@@ -291,6 +304,8 @@ def census_from_index(conn, records: list[PoemRecord], anchors: list[LexicalAnch
                                 normalized_text=_ntext,
                                 token_start=toks[i][1],
                                 token_end=toks[i + n - 1][2],
+                                verse_order=vorder,
+                                corpus_snapshot_id=corpus_snapshot_id,
                             ))
 
     hits: list[AnchorHit] = []

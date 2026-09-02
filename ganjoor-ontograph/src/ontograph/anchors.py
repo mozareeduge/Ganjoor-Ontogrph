@@ -13,8 +13,10 @@ not regress to that.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from ontograph.field import PoemRecord
 from ontograph.normalize import NORMALIZATION_PROFILE_VERSION, TOKENIZER_VERSION, normalize, tokenize
@@ -94,12 +96,40 @@ class AnchorHit:
     normalized_text: str
     token_start: int
     token_end: int
+    verse_order: int | None = None  # T04: source VOrder (set by census); None only for legacy callers
+    corpus_snapshot_id: str | None = None  # T04: content-identity id of the corpus this hit came from
     matcher_version: str = MATCHER_VERSION
     normalization_profile: str = NORMALIZATION_PROFILE_VERSION
     tokenizer_version: str = TOKENIZER_VERSION
 
+    @property
+    def id(self) -> str:
+        """Stable hit ID (spec §6.3, T04): `ah1-` + first 24 lowercase hex
+        of SHA-256 over corpus_snapshot_id + NUL + object_address_id + NUL
+        + lexical_anchor_id + NUL + poem_id + NUL + verse_order + NUL +
+        start + NUL + end + NUL + matcher_version (UTF-8, decimal
+        serialization). Corpus or matcher changes intentionally change
+        IDs. Timestamps and absolute paths never participate."""
+        payload = "\x00".join(
+            [
+                self.corpus_snapshot_id or "none",
+                self.object_address,
+                self.lexical_anchor,
+                str(self.poem_id),
+                str(self.verse_order if self.verse_order is not None else -1),
+                str(self.token_start),
+                str(self.token_end),
+                self.matcher_version,
+            ]
+        ).encode("utf-8")
+        return "ah1-" + hashlib.sha256(payload).hexdigest()[:24]
 
-def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[AnchorHit]:
+
+def census(
+    records: list[PoemRecord],
+    anchors: list[LexicalAnchor],
+    corpus_snapshot_id: str | None = None,
+) -> list[AnchorHit]:
     """Exact anchor-hit census (spec §27.1) restricted to `approved`
     anchors (spec §49) and matched at the TOKEN level, not the substring
     level. `anchors` may name several `object_address`es at once (e.g. one
@@ -115,6 +145,27 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
     # `None` rather than a fabricated value, and `compare.py`'s couplet-
     # scale logic must exclude `None` from participating in couplet-scale
     # co-incidence (two unrelated Comment verses are not "the same couplet").
+    # T04: hits carry the corpus snapshot identity. When the caller omits
+    # it, derive it from the records' shared corpus root (all records in
+    # one census call always come from one scan_corpus root). The root
+    # derivation walks up from the poem path to the dir containing
+    # manifest.json; ad-hoc poem files outside a corpus layout get "none".
+    if corpus_snapshot_id is None and records:
+        poem_path = Path(records[0].path)
+        corpus_root = poem_path.parent
+        for _ in range(5):
+            if (corpus_root / "manifest.json").exists():
+                break
+            if corpus_root.parent == corpus_root:
+                corpus_root = None
+                break
+            corpus_root = corpus_root.parent
+        else:
+            corpus_root = None
+        if corpus_root is not None:
+            from ontograph.corpus import corpus_snapshot as _cs
+
+            corpus_snapshot_id = _cs(corpus_root).snapshot_id
     approved = [a for a in anchors if a.status == "approved"]
     # T02: per-anchor normalized forms keyed by mode. exact anchors keep
     # their single-token set; phrase anchors carry their ordered token
@@ -154,6 +205,8 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
                                 normalized_text=nt.normalized,
                                 token_start=start,
                                 token_end=end,
+                                verse_order=verse["VOrder"],
+                                corpus_snapshot_id=corpus_snapshot_id,
                             )
                         )
             # T02 phrase pass: ordered n-grams within THIS verse only
@@ -171,6 +224,8 @@ def census(records: list[PoemRecord], anchors: list[LexicalAnchor]) -> list[Anch
                                 normalized_text=nt.normalized,
                                 token_start=tokens[i][1],
                                 token_end=tokens[j][2],
+                                verse_order=verse["VOrder"],
+                                corpus_snapshot_id=corpus_snapshot_id,
                             )
                         )
     return hits

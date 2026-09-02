@@ -23,12 +23,19 @@ class CorpusSnapshot:
     verify that claim itself -- it has no git dependency -- so a caller
     that cares about the claim being true should pass a SHA it obtained
     from `git rev-parse HEAD` on the same root, not an assumed value.
+
+    T04 additions: `content_signal` (content hash over poem files) and
+    `snapshot_id` (content-identity id per spec §6.1) are populated by
+    `corpus_snapshot()`; a bare `load_corpus_snapshot()` leaves them None.
     """
 
     root: Path
     manifest: dict
     manifest_sha256: str
     commit: str | None = None
+    content_signal: str | None = None
+    poem_count: int | None = None
+    snapshot_id: str | None = None
 
     @property
     def poets_count(self) -> int:
@@ -57,6 +64,73 @@ def load_corpus_snapshot(root: str | Path, commit: str | None = None) -> CorpusS
     manifest = json.loads(raw)
     digest = hashlib.sha256(raw).hexdigest()
     return CorpusSnapshot(root=root, manifest=manifest, manifest_sha256=digest, commit=commit)
+
+
+# --- T04: content-identity snapshot ID + content signal ---
+
+def corpus_content_signal(root: str | Path) -> str:
+    """Content signal (spec §6.1): a deterministic hash over the corpus's
+    poem JSON content, independent of absolute paths and mtimes. Cheap
+    walk: per-poem-file SHA-256 folded in sorted-relative-path order."""
+    root = Path(root)
+    h = hashlib.sha256()
+    poem_files = sorted(
+        p for p in root.glob("poets/*/**/*.json")
+        if p.name not in ("poet.json", "_cat.json")
+    )
+    for p in poem_files:
+        rel = str(p.relative_to(root)).replace("\\", "/")
+        h.update(rel.encode("utf-8"))
+        h.update(b"\x00")
+        h.update(hashlib.sha256(p.read_bytes()).digest())
+    return h.hexdigest()
+
+
+def corpus_snapshot(root: str | Path) -> "CorpusSnapshot":
+    """Content-identity snapshot (spec §6.1, T04): snapshot_id =
+    `cs1-` + first 24 lowercase hex of SHA-256 over
+    commit-or-none + NUL + manifest-sha256 + NUL + content-signal-sha256.
+    Absolute corpus paths are metadata, not identity, so a portable clean
+    copy receives the SAME id. The commit is read from the root's own git
+    metadata when available; `None` when the root is not a git checkout."""
+    root = Path(root)
+    snap = load_corpus_snapshot(root)
+    try:
+        import subprocess
+
+        commit = (
+            subprocess.run(
+                ["git", "-C", str(root), "rev-parse", "HEAD"],
+                capture_output=True, text=True, check=True, timeout=15,
+            ).stdout.strip()
+            or None
+        )
+    except Exception:
+        commit = None
+    signal = corpus_content_signal(root)
+    identity = "\x00".join(
+        [commit or "none", snap.manifest_sha256, signal]
+    ).encode("utf-8")
+    snapshot_id = "cs1-" + hashlib.sha256(identity).hexdigest()[:24]
+    return CorpusSnapshot(
+        root=root,
+        manifest=snap.manifest,
+        manifest_sha256=snap.manifest_sha256,
+        commit=commit,
+        content_signal=signal,
+        poem_count=len(list(root.glob("poets/*/**/*.json")))
+        - _non_poem_json_count(root),
+        snapshot_id=snapshot_id,
+    )
+
+
+def _non_poem_json_count(root: Path) -> int:
+    reserved = {"poet.json", "_cat.json"}
+    return sum(
+        1
+        for p in root.glob("poets/*/**/*.json")
+        if p.name in reserved
+    )
 
 
 # --- Derived SQLite research index (spec §57) ---
