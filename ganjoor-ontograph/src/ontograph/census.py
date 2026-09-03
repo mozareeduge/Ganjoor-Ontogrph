@@ -79,14 +79,116 @@ def open_context_ladder(hit: AnchorHit, poem_path) -> dict:
 
 
 # --- P2.2: OccurrenceAssessment + OccurrencePolicy ---
+# --- T05: per-hit identity + supersession ---
+#
+# The v0.1 `OccurrenceAssessment` below (anchor_hit_poem_id) is the
+# poem-keyed legacy shape; the execution spec §6.4 defines the per-hit
+# record. T05 adds the per-hit dataclass + supersession machinery
+# WITHOUT touching the legacy shape (compatibility preserved until a
+# migration row changes it). The two classes are deliberately distinct:
+# a test that confused them could not catch a poem-keyed regression.
+
+import uuid as _uuid  # noqa: E402
+
 
 @dataclass(frozen=True)
-class OccurrenceAssessment:
+class OccurrenceAssessment:  # legacy poem-keyed shape (v0.1, kept)
     anchor_hit_poem_id: int
     object_address: str
     decision: str  # accepted | rejected | ambiguous
     rationale: str = ""
     assessor: str = "human"
+
+
+@dataclass(frozen=True)
+class HitOccurrenceAssessment:
+    """Per-hit assessment (spec §6.4, T05). Ledger is append-only; the
+    active decision for a hit is the latest valid row for
+    (object_address_id, anchor_hit_id). Reassessment rows name their
+    predecessor via `supersedes`."""
+
+    id: str
+    anchor_hit_id: str
+    object_address_id: str
+    decision: str  # accepted | rejected | ambiguous
+    rationale: str = ""
+    assessor_type: str = "human"  # human | agent | rule
+    assessor_id: str = ""
+    assessment_policy_version: str = "1.0.0"
+    supersedes: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.decision not in ("accepted", "rejected", "ambiguous"):
+            raise ValueError(f"invalid decision: {self.decision!r}")
+        if self.assessor_type not in ("human", "agent", "rule"):
+            raise ValueError(f"invalid assessor_type: {self.assessor_type!r}")
+
+
+def new_hit_assessment_id() -> str:
+    """Record IDs for historical actions use type prefix + UUID4 hex
+    (spec §6.2): `oa-` here."""
+    return "oa-" + _uuid.uuid4().hex
+
+
+def supersede(
+    predecessor: HitOccurrenceAssessment,
+    decision: str,
+    rationale: str = "",
+    assessor_type: str = "human",
+    assessor_id: str = "",
+) -> HitOccurrenceAssessment:
+    """Create the replacement row for one hit. A superseded row may never
+    be superseded again (it is history, not a live decision) -- refusing
+    here keeps every ledger row resolvable to exactly one active chain."""
+    if getattr(predecessor, "_superseded", False):
+        raise ValueError(
+            f"row {predecessor.id} has already been superseded; "
+            "supersede the ACTIVE row instead (append-only ledger)"
+        )
+    # frozen dataclass: mark the predecessor so a second supersede attempt
+    # in the same session is refused (a superseded row is history, not a
+    # live decision; persistent ledgers enforce the same rule at read time
+    # via active_decision)
+    object.__setattr__(predecessor, "_superseded", True)
+    return HitOccurrenceAssessment(
+        id=new_hit_assessment_id(),
+        anchor_hit_id=predecessor.anchor_hit_id,
+        object_address_id=predecessor.object_address_id,
+        decision=decision,
+        rationale=rationale,
+        assessor_type=assessor_type,
+        assessor_id=assessor_id,
+        supersedes=predecessor.id,
+    )
+
+
+def active_decision(
+    ledger: list[HitOccurrenceAssessment], anchor_hit_id: str
+) -> HitOccurrenceAssessment | None:
+    """Latest valid row for `anchor_hit_id`, or None when the hit has no
+    assessment. Validity: a row is shadowed when a later row supersedes
+    it (directly or transitively)."""
+    rows = [r for r in ledger if r.anchor_hit_id == anchor_hit_id]
+    if not rows:
+        return None
+    superseded_ids = {r.supersedes for r in rows if r.supersedes}
+    live = [r for r in rows if r.id not in superseded_ids]
+    # the active row is the last live one in append order
+    return live[-1] if live else None
+
+
+def hit_decisions(
+    hits: list[AnchorHit], ledger: list[HitOccurrenceAssessment]
+) -> dict[str, str]:
+    """Per-hit active decisions for aggregation (T05): hit id -> decision.
+    A hit with no assessment is NOT in the result -- callers treat absence
+    as unassessed (never silently accepted)."""
+    out: dict[str, str] = {}
+    for h in hits:
+        active = active_decision(ledger, h.id)
+        if active is not None:
+            out[h.id] = active.decision
+    return out
 
 
 def apply_assessments(
