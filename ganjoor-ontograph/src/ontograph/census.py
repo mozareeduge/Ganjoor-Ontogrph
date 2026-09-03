@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import sys
 from dataclasses import dataclass, field as _dc_field
 
 from ontograph.anchors import AnchorHit
@@ -120,7 +121,11 @@ class HitOccurrenceAssessment:
     def __post_init__(self) -> None:
         if self.decision not in ("accepted", "rejected", "ambiguous"):
             raise ValueError(f"invalid decision: {self.decision!r}")
-        if self.assessor_type not in ("human", "agent", "rule"):
+        # 'legacy-poem-decision' is the read-only marker T03's migration
+        # writes for pre-T05 poem-keyed rows: valid in the ledger, but it
+        # provides zero assessed-full coverage (T06) and can never be
+        # created by the assess/walk routes.
+        if self.assessor_type not in ("human", "agent", "rule", "legacy-poem-decision"):
             raise ValueError(f"invalid assessor_type: {self.assessor_type!r}")
 
 
@@ -189,6 +194,77 @@ def hit_decisions(
         if active is not None:
             out[h.id] = active.decision
     return out
+
+
+# --- T06: mode names and completeness enforcement (spec §6.5) ---
+
+CANONICAL_MODES = ("anchor", "assessed-full", "assessed-rule", "estimated")
+
+
+class IncompleteAssessmentError(ValueError):
+    """assessed-full refused because eligible hits lack active assessments.
+    Carries coverage counts and the legal alternative modes/flows."""
+
+    def __init__(self, coverage: tuple[int, int], legal_alternatives: list[str]) -> None:
+        assessed, eligible = coverage
+        self.coverage = coverage
+        self.legal_alternatives = legal_alternatives
+        super().__init__(
+            f"assessed-full requires 100% eligible-hit coverage; "
+            f"coverage is {assessed}/{eligible}. Legal alternatives: "
+            f"{', '.join(legal_alternatives)}"
+        )
+
+
+def resolve_mode_alias(mode: str) -> tuple[str, bool]:
+    """`assessed` is an alias for `assessed-full` through v0.2 and warns
+    on stderr -- it never means partial review (spec §6.5)."""
+    if mode == "assessed":
+        print(
+            "WARNING: --mode assessed is an alias for assessed-full "
+            "(partial review is never reported as assessed-full)",
+            file=sys.stderr,
+        )
+        return "assessed-full", True
+    return mode, False
+
+
+def assessed_full_coverage(
+    hits: list[AnchorHit], ledger: list[HitOccurrenceAssessment]
+) -> tuple[int, int]:
+    """Coverage = active assessed eligible hits / eligible hits (spec
+    §6.5). Only per-hit assessments count; poem-keyed legacy rows
+    (assessor_type 'legacy-poem-decision') provide zero coverage --
+    fanning them across hits is the forbidden shortcut."""
+    eligible = len(hits)
+    if eligible == 0:
+        return (0, 0)
+    assessed = sum(
+        1
+        for r in (active_decision(ledger, h.id) for h in hits)
+        if r is not None and r.assessor_type != "legacy-poem-decision"
+    )
+    return (assessed, eligible)
+
+
+def enforce_mode_completeness(
+    mode: str,
+    hits: list[AnchorHit],
+    ledger: list[HitOccurrenceAssessment],
+) -> None:
+    """Refuse assessed-full below 100% eligible-hit coverage, before any
+    computation, with coverage counts and legal alternatives (spec §6.5,
+    §7: unsupported input fails before computation; silent zero is
+    forbidden)."""
+    mode, _ = resolve_mode_alias(mode)
+    if mode != "assessed-full":
+        return
+    coverage = assessed_full_coverage(hits, ledger)
+    if coverage[0] < coverage[1]:
+        raise IncompleteAssessmentError(
+            coverage,
+            legal_alternatives=["walk", "assessed-rule", "estimated", "anchor"],
+        )
 
 
 def apply_assessments(
