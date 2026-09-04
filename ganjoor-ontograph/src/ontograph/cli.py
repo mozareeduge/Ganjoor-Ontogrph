@@ -455,6 +455,100 @@ def _validate(args) -> dict:
     return {"gates": [_asdict(r) for r in results], "all_green": all(r.passed for r in results)}
 
 
+def _inquire(args) -> dict:
+    """W03: the CREATE form of `inquire` (Amendment §19.4). Persists one
+    ResearchSituation + one candidate InquiryCatalog ATOMICALLY (both or
+    neither), changes no analytical state, emits the review template and
+    the exact next command."""
+    import json as _json
+
+    from ontograph.corpus import corpus_snapshot
+    from ontograph.inquiry import InquiryCandidate, InquiryCatalog, persist_catalog
+    from ontograph.inquiry_parse import parse_hunch, parse_proposal
+    from ontograph.records_v2 import ResearchSituation, persist_situation
+    from ontograph.workspace import read_study_config
+
+    ws = _require_workspace(args)
+    config = read_study_config(ws)
+    parsed = parse_hunch(args.hunch, persian_forms=list(args.persian_form or []))
+
+    # collect attributed proposals (inline JSON + optional file)
+    proposal_dicts: list[dict] = []
+    for raw in args.proposal or []:
+        try:
+            proposal_dicts.append(_json.loads(raw))
+        except _json.JSONDecodeError as e:
+            raise CLIError(f"invalid --proposal JSON: {e}")
+    if args.file:
+        fpath = Path(args.file)
+        if not fpath.exists():
+            raise CLIError(f"proposals file not found: {args.file}")
+        text = fpath.read_text(encoding="utf-8")
+        try:
+            loaded = _json.loads(text)
+        except _json.JSONDecodeError:
+            import yaml
+
+            loaded = yaml.safe_load(text)
+        if isinstance(loaded, dict):
+            loaded = [loaded]
+        if not isinstance(loaded, list):
+            raise CLIError("proposals file must be a list or single proposal")
+        proposal_dicts.extend(loaded)
+
+    # parse + validate ALL proposals BEFORE any write (atomicity)
+    try:
+        candidates = [parse_proposal(p) for p in proposal_dicts]
+        situation = ResearchSituation(
+            study_id=config.get("study_id", ws.name),
+            verbatim_hunch=parsed["verbatim_hunch"],
+            normalized_display_hunch=parsed["normalized_display_hunch"],
+            language_observations=parsed["language_observations"],
+            premature_decisions=[],
+            status="situational",
+            actor=args.actor,
+        )
+        snap = corpus_snapshot(config.get("corpus_root", ".")) if config.get("corpus_root") else None
+        catalog = InquiryCatalog(
+            study_id=situation.study_id,
+            situation_id=situation.id,
+            corpus_snapshot_id=snap.snapshot_id if snap else "cs1-none",
+            field_id="field-unbuilt",
+            scope_spec={"kind": "all"},
+            parameters={"parser": "w02", "probes": []},
+            limitations=["raw retrieval order only", "candidates are unverified proposals"],
+            candidates=candidates,
+        )
+    except ValueError as e:
+        raise CLIError(str(e))  # nothing written: validation precedes persistence
+
+    persist_situation(ws, situation)
+    persist_catalog(ws, catalog)
+
+    needs_vocab = parsed["needs_vocabulary"]
+    next_command = (
+        "ontograph inquire <study> --file <proposals.yaml> (supply attributed Persian candidates)"
+        if needs_vocab
+        else f"ontograph inquire {ws.name} --refresh pending (W04 wires corpus verification)"
+    )
+    return {
+        "situation_id": situation.id,
+        "catalog_id": catalog.id,
+        "candidates": [c.candidate_id for c in candidates],
+        "needs_vocabulary": needs_vocab,
+        "vocabulary_hint": "supplied attributed candidates" if needs_vocab else None,
+        "review_template": {
+            "schema_version": "1.0",
+            "catalog_id": catalog.id,
+            "decisions": [
+                {"candidate_id": c.candidate_id, "decision": "", "rationale": ""}
+                for c in candidates
+            ],
+        },
+        "next_command": next_command,
+    }
+
+
 def _release(args) -> dict:
     ws = _require_workspace(args)
     charter_path = ws / "field" / "charter.yml"
@@ -558,6 +652,16 @@ def _build_parser() -> argparse.ArgumentParser:
     p = top.add_parser("validate", parents=[with_corpus])
     p.add_argument("--gates", action="store_true"); p.add_argument("--repo-root", required=True)
     p.set_defaults(func=_validate)
+
+    # W03: inquiry intake — create form (Amendment §19.4)
+    inq = top.add_parser("inquire", parents=[common])
+    inq.add_argument("study_id")
+    inq.add_argument("--hunch", required=True)
+    inq.add_argument("--actor", required=True)
+    inq.add_argument("--file")  # optional proposals file (YAML/JSON list)
+    inq.add_argument("--proposal", action="append", default=[])  # inline JSON proposals
+    inq.add_argument("--persian-form", action="append", default=[])
+    inq.set_defaults(func=_inquire)
 
     return parser
 
