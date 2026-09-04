@@ -456,23 +456,132 @@ def _validate(args) -> dict:
 
 
 def _inquire(args) -> dict:
-    """W03: the CREATE form of `inquire` (Amendment §19.4). Persists one
-    ResearchSituation + one candidate InquiryCatalog ATOMICALLY (both or
-    neither), changes no analytical state, emits the review template and
-    the exact next command."""
+    """W03/W04B: `inquire` — create (hunch+proposals) or --refresh
+    (corpus-verify an existing catalog, appending a superseding one).
+    Amendment §19.4: create/refresh are mutually exclusive; both persist
+    atomically; both emit the exact next command."""
     import json as _json
 
-    from ontograph.corpus import corpus_snapshot
-    from ontograph.inquiry import InquiryCandidate, InquiryCatalog, persist_catalog
-    from ontograph.inquiry_parse import parse_hunch, parse_proposal
-    from ontograph.records_v2 import ResearchSituation, persist_situation
     from ontograph.workspace import read_study_config
 
     ws = _require_workspace(args)
     config = read_study_config(ws)
-    parsed = parse_hunch(args.hunch, persian_forms=list(args.persian_form or []))
 
-    # collect attributed proposals (inline JSON + optional file)
+    if args.refresh_catalog_id:
+        return _inquire_refresh(ws, config, args)
+    if not args.hunch or not args.actor:
+        raise CLIError("inquire requires --hunch and --actor (or --refresh <catalog-id>)")
+    return _inquire_create(ws, config, args)
+
+
+def _inquire_refresh(ws, config, args) -> dict:
+    """W04B: verify an existing catalog's lexical candidates against the
+    pinned corpus and append a SUPERSEDING catalog with real support
+    statuses + located evidence. The original is never rewritten."""
+    import sqlite3
+
+    from ontograph.corpus import corpus_snapshot, build_index
+    from ontograph.inquiry import (
+        CandidateEvidenceRef, InquiryCandidate, InquiryCatalog,
+        persist_catalog, read_catalogs,
+    )
+
+    root = config.get("corpus_root")
+    if not root:
+        raise CLIError("study has no stored corpus_root (study new --corpus-root)")
+    catalogs = read_catalogs(ws)
+    original = next((c for c in catalogs if c.id == args.refresh_catalog_id), None)
+    if original is None:
+        raise CLIError(f"unknown catalog id: {args.refresh_catalog_id}")
+
+    snap = corpus_snapshot(root)
+    if original.corpus_snapshot_id != snap.snapshot_id:
+        raise CLIError(
+            f"catalog {original.id} was built against snapshot "
+            f"{original.corpus_snapshot_id}; corpus is now {snap.snapshot_id} — "
+            "stale receipts are never silently refreshed against a different corpus"
+        )
+
+    db = Path(root) / "ontograph-support-idx.sqlite"
+    if not db.exists():
+        build_index(root, db)
+    conn = sqlite3.connect(db)
+    try:
+        from ontograph.inquiry_support import compute_support
+
+        new_candidates = []
+        for c in original.candidates:
+            if c.kind in ("non-object-note",):
+                new_candidates.append(c)  # not-applicable kind passes through
+                continue
+            if not _is_persian_form(c.form):
+                new_candidates.append(InquiryCandidate(
+                    candidate_id=c.candidate_id, kind=c.kind, form=c.form,
+                    proposer_type=c.proposer_type, proposer_id=c.proposer_id,
+                    rationale=c.rationale, support_status="not-applicable",
+                ))
+                continue
+            mode = "phrase" if " " in c.form else "exact"
+            support = compute_support(conn, Path(root), snap.snapshot_id,
+                                      form=c.form, match_mode=mode)
+            new_candidates.append(InquiryCandidate(
+                candidate_id=c.candidate_id, kind=c.kind, form=c.form,
+                proposer_type=c.proposer_type, proposer_id=c.proposer_id,
+                rationale=c.rationale,
+                support_status=support["support_status"],
+                hit_count=support["hit_count"],
+                poem_count=support["poem_count"],
+                poet_count=support["poet_count"],
+                evidence=[CandidateEvidenceRef(**e) for e in support["evidence"]],
+            ))
+    finally:
+        conn.close()
+
+    superseding = InquiryCatalog(
+        study_id=original.study_id, situation_id=original.situation_id,
+        corpus_snapshot_id=snap.snapshot_id, field_id=original.field_id,
+        scope_spec=original.scope_spec, parameters=original.parameters,
+        limitations=original.limitations, candidates=new_candidates,
+        supersedes=original.id,
+    )
+    persist_catalog(ws, superseding)
+
+    supported = [c for c in new_candidates if c.support_status == "supported"]
+    return {
+        "catalog_id": superseding.id,
+        "supersedes": original.id,
+        "verified": len(supported),
+        "unsupported": sum(1 for c in new_candidates if c.support_status == "unsupported"),
+        "review_template": {
+            "schema_version": "1.0",
+            "catalog_id": superseding.id,
+            "decisions": [
+                {"candidate_id": c.candidate_id, "decision": "", "rationale": ""}
+                for c in new_candidates if c.support_status == "supported"
+            ],
+        },
+        "next_command": (
+            f"ontograph inquire <study> --review <decisions.json> "
+            f"(human review of catalog {superseding.id})"
+        ),
+    }
+
+
+def _is_persian_form(form: str) -> bool:
+    return any("\u0600" <= ch <= "\u06FF" for ch in form)
+
+
+def _inquire_create(ws, config, args) -> dict:
+    """W03: the CREATE form — one ResearchSituation + one candidate
+    InquiryCatalog, atomically, with review template + next command."""
+    import json as _json
+
+    from ontograph.corpus import corpus_snapshot
+    from ontograph.inquiry import InquiryCatalog, persist_catalog
+    from ontograph.inquiry_parse import parse_hunch, parse_proposal
+    from ontograph.records_v2 import ResearchSituation, persist_situation
+
+    parsed = parse_hunch(args.hunch, persian_forms=list(args.persian_form or []))
     proposal_dicts: list[dict] = []
     for raw in args.proposal or []:
         try:
@@ -509,6 +618,19 @@ def _inquire(args) -> dict:
             actor=args.actor,
         )
         snap = corpus_snapshot(config.get("corpus_root", ".")) if config.get("corpus_root") else None
+        # W03: supplied --persian-form values become lexical-anchor
+        # candidates attributed to the researcher (candidate-tier,
+        # unsupported until W04B verifies them against the corpus)
+        from ontograph.inquiry import InquiryCandidate as _IC
+
+        for form in parsed["persian_forms"]:
+            candidates.append(_IC(
+                candidate_id=f"cand-{abs(hash(form)) % 10**12:012d}",
+                kind="lexical-anchor", form=form,
+                proposer_type="human", proposer_id=args.actor,
+                rationale="supplied with the hunch via --persian-form",
+                support_status="unsupported",
+            ))
         catalog = InquiryCatalog(
             study_id=situation.study_id,
             situation_id=situation.id,
@@ -656,11 +778,12 @@ def _build_parser() -> argparse.ArgumentParser:
     # W03: inquiry intake — create form (Amendment §19.4)
     inq = top.add_parser("inquire", parents=[common])
     inq.add_argument("study_id")
-    inq.add_argument("--hunch", required=True)
-    inq.add_argument("--actor", required=True)
+    inq.add_argument("--hunch")
+    inq.add_argument("--actor")
     inq.add_argument("--file")  # optional proposals file (YAML/JSON list)
     inq.add_argument("--proposal", action="append", default=[])  # inline JSON proposals
     inq.add_argument("--persian-form", action="append", default=[])
+    inq.add_argument("--refresh", dest="refresh_catalog_id")  # W04B: verify an existing catalog
     inq.set_defaults(func=_inquire)
 
     return parser
