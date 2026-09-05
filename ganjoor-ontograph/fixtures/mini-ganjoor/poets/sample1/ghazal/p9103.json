@@ -1,0 +1,44 @@
+{
+  "Id": 9103,
+  "CatId": 1,
+  "Title": "غزل آزمایشی ۱-۳",
+  "FullTitle": "غزل آزمایشی ۱-۳",
+  "FullUrl": "/fixture/9103",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Mirror alone, no rust — contributes to prevalence only.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آینه تنها بر طاقچه نشسته / کسی به او نگاه نمی‌کند",
+      "HtmlText": "<div class='b'>آینه تنها بر طاقچه نشسته / کسی به او نگاه نمی‌کند</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آینه تنها بر طاقچه نشسته",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "کسی به او نگاه نمی‌کند",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}

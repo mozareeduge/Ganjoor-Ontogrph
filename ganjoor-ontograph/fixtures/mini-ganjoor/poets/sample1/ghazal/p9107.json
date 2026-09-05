@@ -1,0 +1,44 @@
+{
+  "Id": 9107,
+  "CatId": 1,
+  "Title": "غزل آزمایشی ۱-۷",
+  "FullTitle": "غزل آزمایشی ۱-۷",
+  "FullUrl": "/fixture/9107",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Substring-false-positive case for Finding 3 of the external review: contains the compound word 'آینه‌بند' (mirror-frame-maker/binder, joined by ZWNJ) which SHARES the literal substring 'آینه' but is a different token, not an occurrence of the word 'mirror'. A naive substring matcher over-counts this as a mirror anchor hit; a token/ZWNJ-aware matcher (spec §58) must not. This poem must NOT appear in poems_with_mirror.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آینه‌بند نو بر دیوار بستند / کاری خوش از دست هنرمند",
+      "HtmlText": "<div class='b'>آینه‌بند نو بر دیوار بستند / کاری خوش از دست هنرمند</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آینه‌بند نو بر دیوار بستند",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "کاری خوش از دست هنرمند",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}

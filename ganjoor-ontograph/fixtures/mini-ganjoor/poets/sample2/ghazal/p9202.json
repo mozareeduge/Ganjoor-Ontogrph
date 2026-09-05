@@ -1,0 +1,44 @@
+{
+  "Id": 9202,
+  "CatId": 2,
+  "Title": "غزل آزمایشی ۲-۲",
+  "FullTitle": "غزل آزمایشی ۲-۲",
+  "FullUrl": "/fixture/9202",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Unrelated filler poem (control unit for the denominator).",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "باغ بهاری پر از گل سرخ / بلبل به شاخه نغمه می‌خواند",
+      "HtmlText": "<div class='b'>باغ بهاری پر از گل سرخ / بلبل به شاخه نغمه می‌خواند</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "باغ بهاری پر از گل سرخ",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "بلبل به شاخه نغمه می‌خواند",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}

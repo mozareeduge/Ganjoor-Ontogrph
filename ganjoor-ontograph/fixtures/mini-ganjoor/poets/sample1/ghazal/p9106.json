@@ -1,0 +1,44 @@
+{
+  "Id": 9106,
+  "CatId": 1,
+  "Title": "غزل آزمایشی ۱-۶",
+  "FullTitle": "غزل آزمایشی ۱-۶",
+  "FullUrl": "/fixture/9106",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Divergence case for Finding 1 of the external review (EXTERNAL_REVIEW.md): mirror and rust are lexically present in the SAME couplet, but the mirror use ('mirror of memory') is figurative and must be assessed REJECTED, while the rust use is literal ('rust settled on the old frame') and must be assessed ACCEPTED. This makes anchor-level mirror-rust co-incidence diverge from assessed-level co-incidence: an engine that computes co-incidence from raw anchors instead of assessed occurrences will count this poem/couplet; a correct engine will not.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آینه در خاطره شکست و رفت / زنگار روی قاب کهنه نشست",
+      "HtmlText": "<div class='b'>آینه در خاطره شکست و رفت / زنگار روی قاب کهنه نشست</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آینه در خاطره شکست و رفت",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "زنگار روی قاب کهنه نشست",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}

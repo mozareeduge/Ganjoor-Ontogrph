@@ -12,3 +12,18 @@ __pycache__/
 
 # OS junk
 .DS_Store
+
+# Claude Code harness runtime state (ephemeral: session leases, active-session
+# registry, instruction cache) — harness-managed, never project artifacts.
+# Kept on disk (the harness rewrites them live); kept out of git.
+.claude/sessions/
+.claude/state/
+
+# session-local artifacts (untracked 2026-09-05)
+.claude/
+.hermes/
+ontograph-workspaces/
+ganjoor-ontograph/ontograph-workspaces/
+*.sqlite
+p99-*.json
+p99-*.err

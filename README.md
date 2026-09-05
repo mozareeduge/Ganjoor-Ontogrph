@@ -1,5 +1,13 @@
 # persian-poetry-ai-agent-plugin
 
+> **This fork also hosts Ganjoor Ontograph** — an OOO-informed close/
+> distant-reading research apparatus built alongside (not on top of) the
+> retrieval layer below. See [`ganjoor-ontograph/README.md`](ganjoor-ontograph/README.md)
+> for the spec, design, and implementation package, and
+> [`ganjoor-ontograph/implementation/HOW_TO_RUN.md`](ganjoor-ontograph/implementation/HOW_TO_RUN.md)
+> to run its build loop. Everything below this notice is the original
+> upstream project this repository was forked from — unchanged.
+
 **English** | [**فارسی**](README.fa.md)
 
 **Agent-ready Persian poetry for QMD** — the complete [Ganjoor](https://ganjoor.net/)
