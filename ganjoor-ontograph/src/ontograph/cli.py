@@ -226,12 +226,43 @@ def _field_build(args) -> dict:
     return {"study_id": args.study_id, "poem_count": len(poem_ids), "poem_ids": poem_ids}
 
 
+def _workspace_is_governed(ws: Path) -> bool:
+    """W06 (Amendment §19.2): a workspace with inquiry history is GOVERNED —
+    object promotion must cite a human review or confirmation receipt."""
+    return (ws / "research" / "inquiry-catalogs.jsonl").exists()
+
+
 def _object_add(args) -> dict:
     ws = _require_workspace(args)
     object_address = args.address or args.label
     if not args.anchor:
         raise CLIError("--anchor is required at least once (an object with no lexical anchor cannot be censused)")
+    # W06 direct-route guard: governed workspaces require a human receipt
+    if _workspace_is_governed(ws):
+        review_id = getattr(args, "review_id", None)
+        conf_file = getattr(args, "confirmation_file", None)
+        if not review_id and not conf_file:
+            raise CLIError(
+                "governed workspace: direct object add requires --review-id <inquiry-review-id> "
+                "or --confirmation-file <human confirmation json> (Amendment §19.2 — "
+                "agent sessions cannot bypass human review)"
+            )
+        if conf_file:
+            conf = json.loads(Path(conf_file).read_text(encoding="utf-8"))
+            for f in ("human_actor", "receipt", "object_id", "rationale"):
+                if not conf.get(f):
+                    raise CLIError(f"confirmation file missing field: {f}")
+            if conf.get("object_id") != object_address:
+                raise CLIError(
+                    f"confirmation file names object {conf.get('object_id')!r}, "
+                    f"but this add targets {object_address!r}"
+                )
     entry = {"id": object_address, "preferred_label": args.label, "anchors": args.anchor}
+    if getattr(args, "review_id", None):
+        entry["promoted_via_review"] = args.review_id
+    if getattr(args, "confirmation_file", None):
+        conf = json.loads(Path(args.confirmation_file).read_text(encoding="utf-8"))
+        entry["human_confirmation"] = {"actor": conf["human_actor"], "receipt": conf["receipt"]}
     path = _object_addresses_path(ws)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
@@ -469,9 +500,60 @@ def _inquire(args) -> dict:
 
     if args.refresh_catalog_id:
         return _inquire_refresh(ws, config, args)
+    if getattr(args, "review", None):
+        return _inquire_review_cli(ws, config, args)
     if not args.hunch or not args.actor:
         raise CLIError("inquire requires --hunch and --actor (or --refresh <catalog-id>)")
     return _inquire_create(ws, config, args)
+
+
+def _inquire_review_cli(ws, config, args) -> dict:
+    """W06: the REVIEW form — apply a decisions file through W05's
+    atomic promotion service, report promoted/rejected/deferred, and
+    emit the next walk command for each promoted object."""
+    from ontograph.inquiry_review import apply_review_decisions
+
+    rpath = Path(args.review)
+    if not rpath.exists():
+        raise CLIError(f"decisions file not found: {args.review}")
+    try:
+        decisions = json.loads(rpath.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        import yaml
+
+        decisions = yaml.safe_load(rpath.read_text(encoding="utf-8"))
+    if not isinstance(decisions, list):
+        raise CLIError("decisions file must be a list of {candidate_id, decision, rationale}")
+    situation = getattr(args, "situation", None)
+    if not situation:
+        raise CLIError("--situation is required for --review")
+    actor = getattr(args, "review_actor", None)
+    if not actor:
+        raise CLIError("--review-actor is required for --review (must be the human reviewer)")
+    receipt = getattr(args, "receipt", None)
+    if not receipt:
+        raise CLIError("--receipt is required for --review")
+
+    result = apply_review_decisions(ws, _catalog_for(ws, situation), situation,
+                                    actor, receipt, decisions)
+    result["next_walk_command"] = (
+        f"ontograph walk <study> --object {result['promoted'][0]}"
+        if result["promoted"] else None
+    )
+    return result
+
+
+def _catalog_for(ws: Path, situation_id: str) -> str:
+    """Resolve the active catalog for a situation: the latest non-superseded
+    one. Refusal when none exists (never guessed)."""
+    from ontograph.inquiry import read_catalogs
+
+    catalogs = [c for c in read_catalogs(ws) if c.situation_id == situation_id]
+    if not catalogs:
+        raise CLIError(f"no catalog found for situation {situation_id!r}")
+    superseded = {c.supersedes for c in catalogs if c.supersedes}
+    live = [c for c in catalogs if c.id not in superseded]
+    return live[-1].id
 
 
 def _inquire_refresh(ws, config, args) -> dict:
@@ -719,8 +801,10 @@ def _build_parser() -> argparse.ArgumentParser:
 
     obj = top.add_parser("object").add_subparsers(dest="object_verb", required=True)
     p = obj.add_parser("add", parents=[common]); p.add_argument("study_id")
-    p.add_argument("--label", required=True); p.add_argument("--address")
+    p.add_argument("--address"); p.add_argument("--label", required=True)
     p.add_argument("--anchor", action="append"); p.set_defaults(func=_object_add)
+    p.add_argument("--review-id")  # W06: citation of a human inquiry review
+    p.add_argument("--confirmation-file")  # W06: direct human confirmation receipt
 
     p = top.add_parser("assess", parents=[common]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--poem-id", type=int, required=True)
@@ -784,6 +868,10 @@ def _build_parser() -> argparse.ArgumentParser:
     inq.add_argument("--proposal", action="append", default=[])  # inline JSON proposals
     inq.add_argument("--persian-form", action="append", default=[])
     inq.add_argument("--refresh", dest="refresh_catalog_id")  # W04B: verify an existing catalog
+    inq.add_argument("--review")  # W06: decisions file for human review
+    inq.add_argument("--situation")  # W06: situation for --review
+    inq.add_argument("--review-actor")  # W06: human reviewer id
+    inq.add_argument("--receipt")  # W06: human confirmation receipt id
     inq.set_defaults(func=_inquire)
 
     return parser
