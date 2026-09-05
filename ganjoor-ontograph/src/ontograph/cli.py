@@ -179,6 +179,13 @@ def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
 
 # --- verb implementations, each returning a plain JSON-serializable dict ---
 
+def _study_status(args) -> dict:
+    """Ledger row U01: report the study chain + the one legal next action."""
+    from ontograph.status import assess_study_state
+    ws = _require_workspace(args)
+    return {"study_id": args.study_id, **assess_study_state(ws)}
+
+
 def _study_new(args) -> dict:
     ws = _workspace_path(args)
     new_study(args.workspaces_dir, args.study_id, corpus_root=args.corpus_root)
@@ -794,6 +801,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p = study.add_parser("new", parents=[common]); p.add_argument("study_id")
     p.add_argument("--corpus-root", default=None)  # P9.1: optionally persist the corpus root for later verbs
     p.set_defaults(func=_study_new)
+    p = study.add_parser("status", parents=[common]); p.add_argument("study_id")
+    p.set_defaults(func=_study_status)
 
     field = top.add_parser("field").add_subparsers(dest="field_verb", required=True)
     p = field.add_parser("build", parents=[with_corpus]); p.add_argument("study_id")
