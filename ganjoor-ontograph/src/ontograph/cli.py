@@ -760,6 +760,81 @@ def _inquire_create(ws, config, args) -> dict:
     }
 
 
+def _source_show(args) -> dict:
+    """Ledger row U02: resolve stored provenance to exact contextual
+    passages. --poem-id reads a poem directly; --operation resolves an
+    OperationRecord's stored source_manifest (no recomputation)."""
+    from ontograph.operations import read_operation_records
+    from ontograph.source_return import (
+        SourceResolutionError,
+        read_operation,
+        resolve_operation_sources,
+        show_poem,
+    )
+
+    ws = _require_workspace(args)
+    if args.corpus_root:
+        corpus_root = args.corpus_root
+    else:
+        config = read_study_config(ws)
+        corpus_root = config.get("corpus_root")
+    if not corpus_root:
+        raise CLIError("no corpus root (pass --corpus-root or study new --corpus-root)")
+
+    if args.poem_id is not None:
+        try:
+            return show_poem(corpus_root, args.poem_id)
+        except SourceResolutionError as e:
+            raise CLIError(str(e))
+
+    if not args.operation:
+        raise CLIError("source show needs --poem-id or --operation <id>")
+    try:
+        record = read_operation(ws, args.operation)
+    except SourceResolutionError as e:
+        raise CLIError(str(e))
+    try:
+        sources = resolve_operation_sources(corpus_root, record)
+    except SourceResolutionError as e:
+        raise CLIError(str(e))
+    return {
+        "operation_id": record["id"],
+        "operation_type": record.get("operation_type"),
+        "study_id": record.get("study_id"),
+        "sources": sources,
+    }
+
+
+def _source_export(args) -> dict:
+    """Ledger row U02: write the source tray (Markdown + JSON) from a stored
+    manifest. Unresolvable manifests (poem:// pointers, missing paths) are a
+    hard refusal -- never a tray with silently omitted provenance."""
+    from ontograph.source_return import (
+        SourceResolutionError,
+        export_sources,
+        read_operation,
+        resolve_operation_sources,
+    )
+
+    ws = _require_workspace(args)
+    if args.corpus_root:
+        corpus_root = args.corpus_root
+    else:
+        config = read_study_config(ws)
+        corpus_root = config.get("corpus_root")
+    if not corpus_root:
+        raise CLIError("no corpus root (pass --corpus-root or study new --corpus-root)")
+    try:
+        record = read_operation(ws, args.operation)
+        sources = resolve_operation_sources(
+            corpus_root, record, require_resolvable=True
+        )
+        written = export_sources(record, sources, Path(args.output))
+    except SourceResolutionError as e:
+        raise CLIError(f"export refused: {e}")
+    return {"operation_id": record["id"], **written}
+
+
 def _release(args) -> dict:
     ws = _require_workspace(args)
     charter_path = ws / "field" / "charter.yml"
@@ -854,6 +929,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p = top.add_parser("release", parents=[common]); p.add_argument("study_id")
     p.add_argument("--version", required=True); p.set_defaults(func=_release)
+
+    # Ledger row U02: source return from stored manifests
+    src = top.add_parser("source").add_subparsers(dest="source_verb", required=True)
+    p = src.add_parser("show", parents=[with_corpus]); p.add_argument("study_id")
+    p.add_argument("--poem-id", type=int, default=None)
+    p.add_argument("--operation")
+    p.set_defaults(func=_source_show)
+    p = src.add_parser("export", parents=[with_corpus]); p.add_argument("study_id")
+    p.add_argument("--operation", required=True)
+    p.add_argument("--output", required=True)
+    p.set_defaults(func=_source_export)
 
     # Ledger row P9.5: the guided calibration/assessment flow. Scripted
     # (--script JSON) or interactive TTY; never a silent non-interactive run.
