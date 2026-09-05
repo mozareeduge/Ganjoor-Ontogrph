@@ -56,9 +56,10 @@ def test_full_cycle_renders_html_and_markdown_with_ground_truth_numbers(tmp_path
     assert walk["summary"] == {"accepted": 5, "rejected": 1, "ambiguous": 1}
 
     code, out = _run(capsys, ["census", "render-study", "--object", "mirror",
-                              "--mode", "assessed", "--corpus-root", FIXTURE_ROOT, *base, "--json"])
+                              "--mode", "assessed-full", "--corpus-root", FIXTURE_ROOT, *base, "--json"])
     assert code == 0
     census = json.loads(out)
+    assert census["mode"] == "assessed-full"
     assert census["numerator"] == 5 and census["denominator"] == 27
 
     # release → BOTH artifacts produced by default

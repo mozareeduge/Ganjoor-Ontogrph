@@ -39,12 +39,20 @@ from pathlib import Path
 from ontograph.ablation import ablation_retention
 from ontograph.anchors import LexicalAnchor
 from ontograph.census import (
+    HitOccurrenceAssessment,
+    IncompleteAssessmentError,
     OccurrenceAssessment,
     accepted_poem_ids,
-    ambiguous_only_poem_ids,
-    assessed_full_prevalence,
+    active_decision,
+    append_hit_assessment,
     calibration_sample,
+    enforce_mode_completeness,
+    hit_poem_sets,
+    load_hit_assessments,
+    new_hit_assessment_id,
     open_context_ladder,
+    resolve_mode_alias,
+    supersede,
 )
 from ontograph.compare import MODE_ANCHOR, MODE_ASSESSED, InsufficientSupportError, compare_fields, lift, typed_coincidence
 from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet, scope_from_dict
@@ -168,6 +176,9 @@ def _scope_allowed(ws: Path, records: list) -> set[int] | None:
 
 
 def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
+    """Legacy poem-keyed accepted-poem set (v0.1 compatibility; only used
+    by the legacy-unframed path, never by the T06 governed assessed-full
+    route)."""
     assessments = _load_assessments(ws, object_address)
     if not assessments:
         raise CLIError(
@@ -175,6 +186,42 @@ def _accepted_or_raise(ws: Path, object_address: str, hits) -> set[int]:
             f"run 'ontograph assess' first, or use --mode anchor"
         )
     return accepted_poem_ids(hits, assessments)
+
+
+def _governed_assessed_poems(
+    args, ws: Path, hits, warn: bool = True
+) -> tuple[str, set[int], set[int]]:
+    """T06 governed assessed route, shared by every assessed-mode verb.
+
+    1. resolves `--mode assessed` as an alias for `assessed-full`
+       (stderr warning; it never means partial review),
+    2. enforces 100% eligible-hit coverage from the PER-HIT ledger
+       (corpus/hit-assessments.jsonl) -- poem-keyed legacy rows provide
+       zero coverage (execution-spec lock T04-T06),
+    3. aggregates active per-hit decisions to poem sets (spec §8.1.1).
+
+    Raises IncompleteAssessmentError (wrapped by main() into exit 1) when
+    coverage is partial -- never silently computes on partial review.
+    `warn=False` suppresses the alias warning for the second+ object of a
+    multi-object verb (the warning is per-invocation, not per-object).
+    The alias is resolved in BOTH cases (enforce_mode_completeness must
+    always see the canonical mode; only the stderr warning is optional).
+    """
+    if warn:
+        mode, _ = resolve_mode_alias(args.mode)
+    else:
+        mode = {"assessed": "assessed-full"}.get(args.mode, args.mode)
+    ledger = load_hit_assessments(ws)
+    enforce_mode_completeness(mode, hits, ledger)
+    accepted, ambiguous_only = hit_poem_sets(hits, ledger)
+    return mode, accepted, ambiguous_only
+
+
+def _resolved_mode(args) -> str:
+    """Resolve the `--mode assessed` alias once, with the stderr warning
+    (spec §6.5) -- for verbs whose assessed branch uses this route."""
+    mode, _ = resolve_mode_alias(args.mode)
+    return mode
 
 
 # --- verb implementations, each returning a plain JSON-serializable dict ---
@@ -281,6 +328,14 @@ def _assess(args) -> dict:
     ws = _require_workspace(args)
     if args.decision not in ("accepted", "rejected", "ambiguous"):
         raise CLIError("--decision must be one of accepted|rejected|ambiguous")
+    if getattr(args, "hit_id", None):
+        return _assess_hit(args, ws)
+    if args.poem_id is None:
+        raise CLIError(
+            "assess requires either --hit-id (per-hit, T06 ledger; counts "
+            "toward assessed-full coverage) or --poem-id (legacy poem-keyed "
+            "compatibility row; provides ZERO assessed-full coverage)"
+        )
     assessment = OccurrenceAssessment(
         anchor_hit_poem_id=args.poem_id, object_address=args.object,
         decision=args.decision, rationale=args.rationale or "", assessor=args.assessor,
@@ -292,6 +347,57 @@ def _assess(args) -> dict:
     return {
         "object_address": args.object, "poem_id": args.poem_id,
         "decision": args.decision, "assessor": args.assessor,
+    }
+
+
+def _assess_hit(args, ws: Path) -> dict:
+    """T06 per-hit assess route (spec §6.4): verify the hit exists in the
+    CURRENT corpus snapshot (a stable `ah1-` ID is snapshot-scoped), then
+    append the HitOccurrenceAssessment to the per-hit ledger
+    (corpus/hit-assessments.jsonl). Re-assessing an already-assessed hit
+    is supersession (append-only: a new row naming its predecessor)."""
+    conn, records = _open_cached_index(args, ws)
+    try:
+        hits = census_from_index(conn, records, _anchors_for(ws, args.object))
+        allowed = _scope_allowed(ws, records)
+        if allowed is not None:
+            hits = [h for h in hits if h.poem_id in allowed]
+    finally:
+        conn.close()
+    hit = next((h for h in hits if h.id == args.hit_id), None)
+    if hit is None:
+        raise CLIError(
+            f"hit {args.hit_id!r} not found in the current corpus snapshot "
+            f"for object {args.object!r} -- run 'ontograph walk {args.study_id} "
+            f"--object {args.object}' (the guided flow lists every hit's "
+            f"anchor_hit_id), or check a corpus re-snapshot"
+        )
+    ledger = load_hit_assessments(ws)
+    active = active_decision(ledger, args.hit_id)
+    if active is not None:
+        row = supersede(
+            active, args.decision, rationale=args.rationale or "",
+            assessor_type=args.assessor_type, assessor_id=args.assessor,
+        )
+        superseded = active.id
+    else:
+        row = HitOccurrenceAssessment(
+            id=new_hit_assessment_id(),
+            anchor_hit_id=args.hit_id,
+            object_address_id=args.object,
+            decision=args.decision,
+            rationale=args.rationale or "",
+            assessor_type=args.assessor_type,
+            assessor_id=args.assessor,
+        )
+        superseded = None
+    append_hit_assessment(ws, row)
+    return {
+        "object_address": args.object, "hit_id": args.hit_id,
+        "decision": args.decision, "assessor_type": args.assessor_type,
+        "assessor_id": args.assessor, "assessment_id": row.id,
+        "superseded": superseded, "poem_id": hit.poem_id,
+        "ledger": "corpus/hit-assessments.jsonl",
     }
 
 
@@ -339,23 +445,21 @@ def _census(args) -> dict:
             poems = sorted({h.poem_id for h in hits})
             return {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
 
-        assessments = _load_assessments(ws, args.object)
-        if not assessments:
-            raise CLIError(
-                f"no assessments recorded for object {args.object!r} -- "
-                f"run 'ontograph assess' first, or use --mode anchor"
-            )
-        all_poem_ids = {r.poem_id for r in records}
-        accepted = accepted_poem_ids(hits, assessments)
-        ambiguous_only = ambiguous_only_poem_ids(hits, assessments)
-        prevalence = assessed_full_prevalence(all_poem_ids, hits, assessments)
+        # T06 governed assessed route: alias warning -> per-hit coverage
+        # gate -> poem aggregation (spec §6.5/§8.1.1). Partial review is
+        # refused before any computation; legacy poem-keyed rows provide
+        # zero coverage (execution-spec lock T04-T06).
+        mode, accepted, ambiguous_only = _governed_assessed_poems(args, ws, hits)
+        eligible_poem_ids = {r.poem_id for r in records}
     finally:
         conn.close()
     return {
-        "object_address": args.object, "mode": "assessed",
-        "numerator": prevalence.numerator, "denominator": prevalence.denominator,
-        "ambiguous_only_count": prevalence.ambiguous_only_count,
-        "accepted_poems": sorted(accepted), "ambiguous_only_poems": sorted(ambiguous_only),
+        "object_address": args.object, "mode": mode,
+        "numerator": len(accepted & eligible_poem_ids),
+        "denominator": len(eligible_poem_ids),
+        "ambiguous_only_count": len(ambiguous_only & eligible_poem_ids),
+        "accepted_poems": sorted(accepted & eligible_poem_ids),
+        "ambiguous_only_poems": sorted(ambiguous_only & eligible_poem_ids),
     }
 
 
@@ -371,14 +475,15 @@ def _map_recurrence(args) -> dict:
             records = [r for r in records if r.poem_id in allowed]
             hits = [h for h in hits if h.poem_id in allowed]
         if args.mode == "anchor":
+            mode = "anchor"
             poems_with_object = {h.poem_id for h in hits}
         else:
-            poems_with_object = _accepted_or_raise(ws, args.object, hits)
+            mode, poems_with_object, _ambiguous = _governed_assessed_poems(args, ws, hits)
         s = spread(poems_with_object, records)
     finally:
         conn.close()
     return {
-        "object_address": args.object, "mode": args.mode, "unit": "poem",
+        "object_address": args.object, "mode": mode, "unit": "poem",
         "distinct_poems": s.distinct_poems, "distinct_poets": s.distinct_poets,
         "total_poems": s.total_poems, "total_poets": s.total_poets,
     }
@@ -397,17 +502,18 @@ def _companions(args) -> dict:
             hits_b = [h for h in hits_b if h.poem_id in allowed]
 
         if args.mode == "anchor":
+            mode_a = "anchor"
             result = typed_coincidence(hits_a, hits_b, mode=MODE_ANCHOR)
             poems_a = {h.poem_id for h in hits_a}
             poems_b = {h.poem_id for h in hits_b}
         else:
-            accepted_a = _accepted_or_raise(ws, args.object, hits_a)
-            accepted_b = _accepted_or_raise(ws, args.with_, hits_b)
+            mode_a, accepted_a, _amb_a = _governed_assessed_poems(args, ws, hits_a)
+            mode_b, accepted_b, _amb_b = _governed_assessed_poems(args, ws, hits_b, warn=False)
             result = typed_coincidence(hits_a, hits_b, mode=MODE_ASSESSED, accepted_a=accepted_a, accepted_b=accepted_b)
             poems_a, poems_b = accepted_a, accepted_b
 
         out = {
-            "object_address": args.object, "with": args.with_, "mode": args.mode, "scale": args.scale,
+            "object_address": args.object, "with": args.with_, "mode": mode_a, "scale": args.scale,
             "poem_scale": sorted(result.poem_scale),
             "couplet_scale": sorted(list(t) for t in result.couplet_scale),
         }
@@ -446,17 +552,20 @@ def _ablate(args) -> dict:
             hits_b = [h for h in hits_b if h.poem_id in allowed]
 
         if args.mode == "anchor":
+            mode_a = "anchor"
             result = ablation_retention(hits_a, hits_b, MODE_ANCHOR, removed_poem_ids)
         else:
-            accepted_a = _accepted_or_raise(ws, addr_a, hits_a)
-            accepted_b = _accepted_or_raise(ws, addr_b, hits_b)
+            mode_a, accepted_a, _amb_a = _governed_assessed_poems(args, ws, hits_a)
+            _mode_b, accepted_b, _amb_b = _governed_assessed_poems(args, ws, hits_b, warn=False)
             result = ablation_retention(
                 hits_a, hits_b, MODE_ASSESSED, removed_poem_ids,
                 accepted_a=accepted_a, accepted_b=accepted_b,
             )
     finally:
         conn.close()
-    return {"removed": args.remove, "relation": f"{addr_a}-{addr_b}", "mode": args.mode, **asdict(result)}
+    # asdict(result) may itself carry the engine's legacy mode constant;
+    # the canonical CLI mode (T06 §19) must win -- spread it first.
+    return {"removed": args.remove, "relation": f"{addr_a}-{addr_b}", **asdict(result), "mode": mode_a}
 
 
 def _compare(args) -> dict:
@@ -473,7 +582,11 @@ def _compare(args) -> dict:
         if allowed is not None:
             records = [r for r in records if r.poem_id in allowed]
             hits = [h for h in hits if h.poem_id in allowed]
-        hit_poems = {h.poem_id for h in hits} if args.mode == "anchor" else _accepted_or_raise(ws, args.object, hits)
+        if args.mode == "anchor":
+            hit_poems = {h.poem_id for h in hits}
+            mode = "anchor"
+        else:
+            mode, hit_poems, _ambiguous = _governed_assessed_poems(args, ws, hits)
         field_a, field_b = args.fields
         slug_a, slug_b = field_a[len("poet:"):], field_b[len("poet:"):]
         poems_a = {r.poem_id for r in records if r.poet_slug == slug_a}
@@ -481,7 +594,7 @@ def _compare(args) -> dict:
         result = compare_fields(hit_poems & poems_a, len(poems_a), hit_poems & poems_b, len(poems_b))
     finally:
         conn.close()
-    return {"object_address": args.object, "mode": args.mode, "field_a": field_a, "field_b": field_b, **asdict(result)}
+    return {"object_address": args.object, "mode": mode, "field_a": field_a, "field_b": field_b, **asdict(result)}
 
 
 def _validate(args) -> dict:
@@ -891,9 +1004,15 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--confirmation-file")  # W06: direct human confirmation receipt
 
     p = top.add_parser("assess", parents=[common]); p.add_argument("study_id")
-    p.add_argument("--object", required=True); p.add_argument("--poem-id", type=int, required=True)
+    p.add_argument("--object", required=True); p.add_argument("--poem-id", type=int, default=None)
+    # T06: per-hit route — an Anchor Hit (ah1- ID) is what may count for
+    # the object; --hit-id appends a HitOccurrenceAssessment row to the
+    # per-hit ledger and is what assessed-full coverage counts.
+    p.add_argument("--hit-id", default=None)
     p.add_argument("--decision", required=True, choices=["accepted", "rejected", "ambiguous"])
-    p.add_argument("--rationale", default=""); p.add_argument("--assessor", default="human")
+    p.add_argument("--rationale", default="")
+    p.add_argument("--assessor-type", default="human", choices=["human", "agent", "rule"])
+    p.add_argument("--assessor", default="human")
     p.set_defaults(func=_assess)
 
     p = top.add_parser("calibrate", parents=[with_corpus]); p.add_argument("study_id")
@@ -901,30 +1020,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=0); p.set_defaults(func=_calibrate)
 
     p = top.add_parser("census", parents=[with_corpus]); p.add_argument("study_id")
-    p.add_argument("--object", required=True); p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
+    p.add_argument("--object", required=True); p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
     p.set_defaults(func=_census)
 
     map_ = top.add_parser("map").add_subparsers(dest="map_verb", required=True)
     p = map_.add_parser("recurrence", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--unit", default="poem")
-    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
     p.set_defaults(func=_map_recurrence)
 
     p = top.add_parser("companions", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--with", dest="with_", required=True)
     p.add_argument("--scale", default="poem"); p.add_argument("--min-support", type=int, default=5)
-    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
     p.set_defaults(func=_companions)
 
     p = top.add_parser("compare", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True)
     p.add_argument("--field", dest="fields", action="append", required=True)
-    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
     p.set_defaults(func=_compare)
 
     p = top.add_parser("ablate", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--remove", required=True); p.add_argument("--rerun", required=True)
-    p.add_argument("--mode", choices=["anchor", "assessed"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
     p.set_defaults(func=_ablate)
 
     p = top.add_parser("release", parents=[common]); p.add_argument("study_id")
@@ -979,6 +1098,11 @@ def main(argv: list[str] | None = None) -> int:
         result = args.func(args)
     except CLIError as e:
         print(str(e), file=sys.stderr)
+        return 1
+    except IncompleteAssessmentError as e:
+        # T06: assessed-full refusal below 100% eligible-hit coverage --
+        # message carries the coverage counts and legal alternatives.
+        print(f"refused: {e}", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -72,28 +72,35 @@ def test_heart_scale_guided_flow_matches_ground_truth(tmp_path, capsys):
     assert result["summary"] == {"accepted": 40, "rejected": 0, "ambiguous": 1}
     assert result["undecided"] == []
 
-    # assessed-mode census matches the hand-derived ground truth
+    # assessed-full census matches the hand-derived ground truth
     code, out = _run(capsys, ["census", "heart-study", "--object", "heart",
-                              "--mode", "assessed", "--corpus-root", FIX, *base, "--json"])
+                              "--mode", "assessed-full", "--corpus-root", FIX, *base, "--json"])
     assert code == 0
     census = json.loads(out)
+    assert census["mode"] == "assessed-full"
     assert census["numerator"] == 10  # 10 accepted poems
     assert sorted(census["accepted_poems"]) == list(range(9401, 9411))
     assert census["ambiguous_only_poems"] == [9105]
 
-    # companions across the field at assessed mode (rust co-presence is zero
-    # in sample4 by construction; assert the verb runs and returns a number)
+    # companions across the field at assessed-full mode (rust co-presence is
+    # zero in sample4 by construction; assert the verb runs and returns a
+    # number). T06: coverage for BOTH objects comes from the per-hit ledger
+    # -- rust's acceptance enters through its own scripted walk (4 hits),
+    # NOT through a legacy poem-keyed row (zero assessed-full coverage).
     code, _ = _run(capsys, ["object", "add", "heart-study", "--label", "زنگار", "--address", "rust",
                             "--anchor", "زنگار", *base, "--json"])
     assert code == 0
-    # assessed companions needs assessments for BOTH objects: one rust
-    # one-off correction via per-hit assess (the skill's documented pattern)
-    code, _ = _run(capsys, ["assess", "heart-study", "--object", "rust", "--poem-id", "9101",
-                            "--decision", "accepted", *base, "--json"])
-    assert code == 0
+    rust_script = {"responses": ["a"] * 4}  # rust has exactly 4 fixture hits
+    rust_script_path = tmp_path / "rust-walk.json"
+    rust_script_path.write_text(json.dumps(rust_script), encoding="utf-8")
+    code, out = _run(capsys, ["walk", "heart-study", "--object", "rust",
+                              "--script", str(rust_script_path), "--corpus-root", FIX, *base, "--json"])
+    assert code == 0, out
+    assert json.loads(out)["summary"]["accepted"] == 4
     code, out = _run(capsys, ["companions", "heart-study", "--object", "heart", "--with", "rust",
-                              "--scale", "poem", "--mode", "assessed",
+                              "--scale", "poem", "--mode", "assessed-full",
                               "--corpus-root", FIX, *base, "--json"])
     assert code == 0
     companions = json.loads(out)
-    assert "companions" in companions or "lift" in json.dumps(companions)
+    assert companions["mode"] == "assessed-full"
+    assert companions["poem_scale"] == []  # no co-presence by construction

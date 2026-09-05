@@ -267,6 +267,85 @@ def enforce_mode_completeness(
         )
 
 
+# --- T06: per-hit assessment ledger (append-only, spec §6.4/§6.5) ---
+# The per-hit HitOccurrenceAssessment rows live in their own workspace
+# ledger (`corpus/hit-assessments.jsonl`), separate from the legacy
+# poem-keyed occurrence ledger that `assess`/`walk` still write for
+# v0.1 compatibility. Coverage (assessed_full_coverage) reads ONLY this
+# per-hit ledger -- fanning poem-keyed rows across hits is the forbidden
+# shortcut (execution-spec lock T04-T06: "remove poem-keyed compatibility
+# calculation from the per-hit path").
+
+HIT_ASSESSMENTS_REL = "corpus/hit-assessments.jsonl"
+
+
+def hit_assessments_path(ws) -> "Path":
+    from pathlib import Path as _Path
+
+    return _Path(ws) / "corpus" / "hit-assessments.jsonl"
+
+
+def load_hit_assessments(ws) -> list[HitOccurrenceAssessment]:
+    """Read the study's per-hit ledger into HitOccurrenceAssessment rows.
+    Malformed JSON lines fail loudly (no silent skip -- spec §7)."""
+    path = hit_assessments_path(ws)
+    if not path.exists():
+        return []
+    rows: list[HitOccurrenceAssessment] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        entry = json.loads(line)
+        rows.append(HitOccurrenceAssessment(
+            id=entry["id"],
+            anchor_hit_id=entry["anchor_hit_id"],
+            object_address_id=entry["object_address_id"],
+            decision=entry["decision"],
+            rationale=entry.get("rationale", ""),
+            assessor_type=entry.get("assessor_type", "human"),
+            assessor_id=entry.get("assessor_id", ""),
+            assessment_policy_version=entry.get("assessment_policy_version", "1.0.0"),
+            supersedes=entry.get("supersedes"),
+        ))
+    return rows
+
+
+def append_hit_assessment(ws, row: HitOccurrenceAssessment) -> None:
+    """Append one per-hit assessment row. Append-only: nothing here ever
+    rewrites or deletes a line (supersession adds a new row instead)."""
+    from dataclasses import asdict as _asdict
+
+    path = hit_assessments_path(ws)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(_asdict(row), ensure_ascii=False) + "\n")
+
+
+def hit_poem_sets(
+    hits: list[AnchorHit], ledger: list[HitOccurrenceAssessment]
+) -> tuple[set[int], set[int]]:
+    """Poem-level aggregation of per-hit active decisions (spec §8.1.1):
+    a poem is ACCEPTED-present when any of its eligible hits has an active
+    accepted decision; AMBIGUOUS-ONLY when no accepted hit and at least one
+    ambiguous hit. Unassessed hits cannot occur downstream of
+    enforce_mode_completeness (T06 refuses below 100% coverage), so a poem
+    whose decisions are all 'rejected' is simply absent from both sets.
+    This replaces the poem-keyed compatibility calculation (T04-T06 lock).
+    """
+    decisions = hit_decisions(hits, ledger)
+    accepted: set[int] = set()
+    ambiguous_only: set[int] = set()
+    for h in hits:
+        d = decisions.get(h.id)
+        if d == "accepted":
+            accepted.add(h.poem_id)
+        elif d == "ambiguous":
+            ambiguous_only.add(h.poem_id)
+    # a poem with any accepted hit leaves the ambiguous-only bucket
+    return accepted, ambiguous_only - accepted
+
+
 def apply_assessments(
     hits: list[AnchorHit], assessments: dict[int, str]
 ) -> list[tuple[AnchorHit, str]]:

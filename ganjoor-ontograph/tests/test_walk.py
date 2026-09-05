@@ -81,13 +81,15 @@ def test_scripted_walkthrough_reproduces_canonical_assessments(tmp_path, capsys)
         # the flow already wrote it, the CLI accepts the latest-entry-wins repeat
         assert code == 0
 
-    # assessed-mode census through the written assessments matches ground truth
+    # assessed-full census through the per-hit ledger matches ground truth
+    # (T06: walk persists one HitOccurrenceAssessment per decided hit, so
+    # the canonical walkthrough reaches 100% eligible-hit coverage)
     code, out = _run(capsys, ["census", "walk-study", "--object", "mirror",
-                              "--mode", "assessed", "--corpus-root", FIXTURE_ROOT, *base, "--json"])
+                              "--mode", "assessed-full", "--corpus-root", FIXTURE_ROOT, *base, "--json"])
     assert code == 0
     result = json.loads(result_guard(out))
-    assert result["mode"] == "assessed"
-    assert sorted(result["accepted_poems"]) == sorted(int(p) for p in canon if canon[p] == "accepted")
+    assert result["mode"] == "assessed-full"
+    assert sorted(result["accepted_poems"]) == [9101, 9102, 9103, 9104, 9201]
 
 
 def result_guard(out):
@@ -116,13 +118,29 @@ def test_walk_undecided_hits_never_imputed(tmp_path, capsys):
     assert result["summary"]["accepted"] == 1
     assert len(result["undecided"]) == 6
 
-    # assessed-mode census counts ONLY the written decision — never imputed
+    # T06: undecided hits are never imputed. Partial coverage (1/7) is
+    # REFUSED -- the written decision is never silently extrapolated.
+    code = main(["census", "und-study", "--object", "mirror",
+                 "--mode", "assessed-full", "--corpus-root", FIXTURE_ROOT, *base, "--json"])
+    captured = capsys.readouterr()
+    assert code != 0
+    assert "1/7" in captured.err
+
+    # deciding the remaining hits explicitly (a second walk) completes
+    # coverage; the census then counts ONLY the written decisions:
+    # the first hit's poem accepted, the six re-decided hits rejected.
+    script2 = {"responses": ["a", "r", "r", "r", "r", "r", "r"]}
+    script2_path = tmp_path / "walk-script2.json"
+    script2_path.write_text(json.dumps(script2), encoding="utf-8")
+    code, out = _run(capsys, ["walk", "und-study", "--object", "mirror",
+                              "--script", str(script2_path), "--corpus-root", FIXTURE_ROOT, *base, "--json"])
+    assert code == 0
     code, out = _run(capsys, ["census", "und-study", "--object", "mirror",
-                              "--mode", "assessed", "--corpus-root", FIXTURE_ROOT, *base, "--json"])
+                              "--mode", "assessed-full", "--corpus-root", FIXTURE_ROOT, *base, "--json"])
     assert code == 0
     result = json.loads(out)
-    assert result["numerator"] == 1
-    assert len(result["ambiguous_only_poems"]) == 0  # undecided != ambiguous
+    assert result["numerator"] == 1  # only the one accepted poem
+    assert result["ambiguous_only_poems"] == []  # undecided != ambiguous
 
 
 def test_walk_narrow_forks_and_records_anchor_revision(tmp_path, capsys):

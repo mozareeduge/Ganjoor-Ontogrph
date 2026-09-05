@@ -31,7 +31,17 @@ import sys
 from dataclasses import asdict
 from pathlib import Path
 
-from ontograph.census import OccurrenceAssessment, calibration_sample, open_context_ladder
+from ontograph.census import (
+    HitOccurrenceAssessment,
+    OccurrenceAssessment,
+    active_decision,
+    append_hit_assessment,
+    calibration_sample,
+    load_hit_assessments,
+    new_hit_assessment_id,
+    open_context_ladder,
+    supersede,
+)
 from ontograph.records import EventRecord, write_record
 
 
@@ -90,6 +100,7 @@ def run_walk(
     events: list[dict] = []
     traces = 0
     decisions: list[OccurrenceAssessment] = []
+    hit_rows: list[tuple] = []  # (AnchorHit, decision) for the per-hit ledger (T06)
     undecided: list[int] = []
     seq = _next_event_seq(ws, study_id)
 
@@ -108,6 +119,11 @@ def run_walk(
                 anchor_hit_poem_id=hit.poem_id, object_address=object_address,
                 decision=decision, rationale="", assessor=assessor,
             ))
+            # T06: the same decision also lands in the PER-HIT ledger
+            # (corpus/hit-assessments.jsonl) -- this is what assessed-full
+            # coverage counts (spec §6.4/§6.5). Re-deciding a hit across
+            # sessions is supersession (append-only chain).
+            hit_rows.append((hit, decision))
             continue
 
         if token.startswith("n:"):
@@ -167,6 +183,27 @@ def run_walk(
     with ledger.open("a", encoding="utf-8") as f:
         for a in decisions:
             f.write(json.dumps(asdict(a), ensure_ascii=False) + "\n")
+
+    # T06: per-hit ledger write-out (assessed-full coverage reads THIS).
+    # Re-decided hits supersede their prior active row; the legacy
+    # poem-keyed write above stays for v0.1 compatibility only.
+    existing = load_hit_assessments(ws)
+    for hit, decision in hit_rows:
+        active = active_decision(existing, hit.id)
+        if active is not None:
+            row = supersede(active, decision, assessor_id=assessor)
+            existing.append(row)
+        else:
+            row = HitOccurrenceAssessment(
+                id=new_hit_assessment_id(),
+                anchor_hit_id=hit.id,
+                object_address_id=object_address,
+                decision=decision,
+                assessor_type="human",
+                assessor_id=assessor,
+            )
+            existing.append(row)
+        append_hit_assessment(ws, row)
 
     for ev in events:
         append_walk_event(ws, study_id, ev, seq)
