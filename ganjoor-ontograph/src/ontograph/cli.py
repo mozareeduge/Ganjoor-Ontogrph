@@ -510,6 +510,10 @@ def _census(args) -> dict:
                     ws, args.study_id, "census", {"mode": args.mode},
                     result, hits, records, situation_id,
                 )
+                # U05: result card rides on governed results only
+                from ontograph.result_cards import build_result_card
+
+                result["card"] = build_result_card("census", result)
             return result
 
         # T06 governed assessed route: alias warning -> per-hit coverage
@@ -533,6 +537,10 @@ def _census(args) -> dict:
             ws, args.study_id, "census", {"mode": mode},
             result, hits, records, situation_id,
         )
+        # U05: result card rides on governed results only
+        from ontograph.result_cards import build_result_card
+
+        result["card"] = build_result_card("census", result)
     return result
 
 
