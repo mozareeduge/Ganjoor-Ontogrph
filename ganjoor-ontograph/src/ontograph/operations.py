@@ -18,6 +18,13 @@ from pathlib import Path
 OPERATION_SCHEMA_VERSION = "3.0.0"
 OPERATIONS_REL = "corpus/operations.jsonl"
 
+# W07A (Amendment §19.6): OperationRecord schema 3 carries the governed
+# inquiry context. `governed` = written under an active ResearchSituation;
+# `legacy-unframed` = a pre-amendment row (no situation fields) -- readable
+# forever, immutable, but it cannot support higher records or release.
+GOVERNED = "governed"
+LEGACY_UNFRAMED = "legacy-unframed"
+
 
 def new_operation_id() -> str:
     return "op-" + uuid.uuid4().hex
@@ -36,11 +43,15 @@ def build_operation_record(
     scope_spec: dict | None = None,
     limitations: list[str] | None = None,
     poem_paths: dict[int, str] | None = None,
+    situation_id: str | None = None,
+    inquiry_status: str | None = None,
 ) -> dict:
     """Assemble the §6.6 record. Source paths come from `poem_paths`
     (poem_id -> repository-relative path, supplied by the caller from its
     scan/index records); hits without a mapped path get a `poem://`
-    pointer so provenance is never silently empty."""
+    pointer so provenance is never silently empty. W07A: `situation_id`
+    records the governing ResearchSituation; a record with a situation is
+    `governed` (explicit `inquiry_status` overrides)."""
     by_poem: dict[int, list] = {}
     for h in hits:
         by_poem.setdefault(h.poem_id, []).append(h)
@@ -73,6 +84,11 @@ def build_operation_record(
         "source_manifest": source_manifest,
         "corpus_snapshot": {"snapshot_id": corpus_snapshot_id},
         "limitations": limitations or [],
+        # W07A: governed inquiry context (schema 3). A record built with a
+        # situation is `governed`; None + None stays schema-compatible and
+        # the TOLERANT READER marks such stored rows legacy-unframed.
+        "situation_id": situation_id,
+        "inquiry_status": inquiry_status or (GOVERNED if situation_id else None),
     }
 
 
@@ -92,10 +108,24 @@ def persist_operation_record(workspace: Path, record: dict, timeout_s: float = 1
 
 
 def read_operation_records(workspace: Path) -> list[dict]:
+    """Tolerant reader (W07A): every stored row gains the schema-3
+    situation fields. A row without them (schema 1/2) is marked
+    `legacy-unframed` with situation_id None -- never raised, never
+    fabricated, never mutated on disk (append-only history)."""
     path = _operations_path(workspace)
     if not path.exists():
         return []
-    return [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    out: list[dict] = []
+    for l in path.read_text(encoding="utf-8").splitlines():
+        if not l.strip():
+            continue
+        record = json.loads(l)
+        if "situation_id" not in record:
+            record["situation_id"] = None
+        if record.get("inquiry_status") is None:
+            record["inquiry_status"] = LEGACY_UNFRAMED
+        out.append(record)
+    return out
 
 
 import contextlib as _contextlib  # noqa: E402
