@@ -706,6 +706,106 @@ def _validate(args) -> dict:
     return {"gates": [_asdict(r) for r in results], "all_green": all(r.passed for r in results)}
 
 
+# --- U04: validated CRUD for declared research records (§7, §19.2) ---
+
+# Machine-managed stores have their own governed writers (inquire, review,
+# walk/assess, operations, mappings, promotion); the generic route never
+# writes them (Amendment §19.2 candidate-store isolation).
+MACHINE_MANAGED_TYPES = frozenset({
+    "research-situation", "situation", "seed", "inquiry-catalog", "catalog",
+    "inquiry-review", "review", "occurrence-assessment", "assessment",
+    "hit-assessment", "operation", "operation-record", "mapping",
+    "mapping-object", "relation", "relation-object", "claim",
+    "descriptive-catalog", "occurrence-policy",
+})
+
+# record add only accepts the types records.py can validate and persist
+U04_RECORD_TYPES = ("trace", "profile", "experiment", "finding")
+
+
+def _record_add(args) -> dict:
+    from ontograph.records import RECORD_CLASSES, read_records, write_record
+
+    ws = _require_workspace(args)
+    rtype = args.type
+    if rtype in MACHINE_MANAGED_TYPES:
+        raise CLIError(
+            f"record type {rtype!r} is machine-managed (Amendment §19.2) -- "
+            f"it is written only through its governed route, never via "
+            f"'record add'"
+        )
+    if rtype not in RECORD_CLASSES or rtype not in U04_RECORD_TYPES:
+        raise CLIError(
+            f"unknown record type: {rtype!r} (declared generic types: "
+            f"{', '.join(U04_RECORD_TYPES)})"
+        )
+    path = Path(args.file)
+    if not path.exists():
+        raise CLIError(f"record file not found: {path}")
+    text = path.read_text(encoding="utf-8")
+    if path.suffix.lower() in (".yaml", ".yml"):
+        import yaml
+
+        payload = yaml.safe_load(text)
+    else:
+        payload = json.loads(text)
+    if not isinstance(payload, dict):
+        raise CLIError(f"record file must contain a JSON/YAML object: {path}")
+    cls = RECORD_CLASSES[rtype]
+    try:
+        record = cls(**payload)  # __post_init__ validates the schema
+    except TypeError as e:
+        raise CLIError(f"invalid {rtype} schema (unknown/missing fields): {e}")
+    except ValueError as e:
+        raise CLIError(f"invalid {rtype} schema: {e}")
+
+    # U04+W07B governed evidence rule: a Finding may only cite governed
+    # OperationRecords -- legacy-unframed/missing citations refuse.
+    if rtype == "finding":
+        from ontograph.w07 import governed_operation_eligible
+
+        cited = getattr(record, "operation_or_construction", "")
+        if cited:
+            ok, why = governed_operation_eligible(ws, [cited])
+            if not ok:
+                raise CLIError(f"finding refused: {why}")
+
+    write_record(ws, rtype, record)
+    return {"record_id": record.id, "type": rtype}
+
+
+def _record_show(args) -> dict:
+    from dataclasses import asdict as _asdict
+
+    from ontograph.records import read_records
+
+    ws = _require_workspace(args)
+    for rtype in U04_RECORD_TYPES:
+        for record in read_records(ws, rtype):
+            if record.id == args.id:
+                return {"type": rtype, **_asdict(record)}
+    raise CLIError(f"record not found: {args.id!r}")
+
+
+def _record_list(args) -> dict:
+    from dataclasses import asdict as _asdict
+
+    from ontograph.records import read_records
+
+    ws = _require_workspace(args)
+    if getattr(args, "type", None):
+        records = read_records(ws, args.type)
+        return {"type": args.type, "count": len(records),
+                "ids": [r.id for r in records]}
+    out = {"count": 0, "ids": [], "by_type": {}}
+    for rtype in U04_RECORD_TYPES:
+        records = read_records(ws, rtype)
+        out["by_type"][rtype] = [_asdict(r) for r in records]
+        out["ids"].extend(r.id for r in records)
+        out["count"] += len(records)
+    return out
+
+
 def _inquire(args) -> dict:
     """W03/W04B: `inquire` — create (hunch+proposals) or --refresh
     (corpus-verify an existing catalog, appending a superseding one).
@@ -1190,6 +1290,19 @@ def _build_parser() -> argparse.ArgumentParser:
     inq.add_argument("--review-actor")  # W06: human reviewer id
     inq.add_argument("--receipt")  # W06: human confirmation receipt id
     inq.set_defaults(func=_inquire)
+
+    # U04: validated CRUD for the declared generic research records
+    rec = top.add_parser("record", parents=[common]).add_subparsers(dest="record_verb", required=True)
+    p = rec.add_parser("add", parents=[common]); p.add_argument("study_id")
+    p.add_argument("--type", required=True)
+    p.add_argument("--file", required=True)
+    p.set_defaults(func=_record_add)
+    p = rec.add_parser("show", parents=[common]); p.add_argument("study_id")
+    p.add_argument("--id", required=True)
+    p.set_defaults(func=_record_show)
+    p = rec.add_parser("list", parents=[common]); p.add_argument("study_id")
+    p.add_argument("--type", default=None)
+    p.set_defaults(func=_record_list)
 
     return parser
 
