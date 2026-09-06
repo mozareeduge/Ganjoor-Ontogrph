@@ -1157,21 +1157,64 @@ def _source_export(args) -> dict:
 
 
 def _release(args) -> dict:
+    from ontograph.w07 import is_governed_workspace
+
     ws = _require_workspace(args)
     charter_path = ws / "field" / "charter.yml"
     field_charter = charter_path.read_text(encoding="utf-8") if charter_path.exists() else ""
-    release = generate_release(
-        ws, id=f"release-{args.version}", version=args.version,
-        field_charter=field_charter, data_license_notice=DATA_LICENSE_NOTICE,
-    )
+    if is_governed_workspace(ws):
+        # W09A/W09B (§19.7): a governed study releases the full staged
+        # layout — inquiry history + records + manifest — and renders
+        # from staged content only. Tagging commits it all.
+        from ontograph.release_v2 import collect_governed_release
+        from ontograph.report_v2 import render_release_reports as render_staged
+        from ontograph.operations import read_operation_records
+
+        ops = read_operation_records(ws)
+        snapshot = next(
+            (o["corpus_snapshot"]["snapshot_id"] for o in ops
+             if o.get("corpus_snapshot", {}).get("snapshot_id")),
+            "cs1-unknown",
+        )
+        collect_governed_release(
+            ws, version=args.version, study_id=args.study_id,
+            corpus_snapshot={"snapshot_id": snapshot},
+            field_charter=field_charter,
+        )
+        release_dir = ws / "releases" / f"v{args.version}"
+        render_staged(release_dir)
+        # rendering rewrote report.md/html AFTER the manifest was stamped —
+        # re-stamp so the manifest covers the FINAL bytes (W09B)
+        import hashlib as _hashlib
+
+        lines = []
+        for f in sorted(p for p in release_dir.rglob("*") if p.is_file()):
+            rel = str(f.relative_to(release_dir)).replace("\\", "/")
+            if rel == "manifest.sha256":
+                continue
+            lines.append(f"{_hashlib.sha256(f.read_bytes()).hexdigest()}  {rel}")
+        (release_dir / "manifest.sha256").write_text(
+            "\n".join(lines) + "\n", encoding="utf-8"
+        )
+        release = None
+    else:
+        release = generate_release(
+            ws, id=f"release-{args.version}", version=args.version,
+            field_charter=field_charter, data_license_notice=DATA_LICENSE_NOTICE,
+        )
     tag = release_as_git_tag(ws, args.version)
     # Ledger row P9.8: every release renders report.md + report.html by
     # default (the researcher's binding format decision); other formats
-    # only on explicit request, so none are offered here.
-    from ontograph.report import render_release_reports
+    # only on explicit request, so none are offered here. Governed
+    # releases render inside collect_governed_release (staged-only).
+    if release is not None:
+        from ontograph.report import render_release_reports
 
-    rendered = render_release_reports(ws, args.version)
-    return {"release_id": release.id, "version": release.version, "tag": tag,
+        rendered = render_release_reports(ws, args.version)
+    else:
+        md = ws / "releases" / f"v{args.version}" / "report.md"
+        rendered = {"markdown": str(md), "html": str(md).replace(".md", ".html")}
+    return {"release_id": f"release-{args.version}", "version": args.version, "tag": tag,
             "report_markdown": rendered["markdown"], "report_html": rendered["html"]}
 
 

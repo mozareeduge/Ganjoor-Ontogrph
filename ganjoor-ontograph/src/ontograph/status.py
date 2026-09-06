@@ -30,8 +30,65 @@ def _live_catalogs(catalogs):
     return [c for c in catalogs if c.get('id') not in superseded]
 
 
-def assess_study_state(ws):
-    """Return state/suggestion/forbidden/chain for a study workspace."""
+def _inquiry_card(ws, situations, catalogs, reviews, operations, assessments):
+    """W09B: the inquiry status card — every value read from the stored
+    records, exactly as stored. No computation beyond counting."""
+    live_ids = {c.get('id') for c in _live_catalogs(catalogs)}
+    live = [c for c in catalogs if c.get('id') in live_ids]
+    candidates = []
+    for c in live:
+        for cd in (c.get('candidates') or []):
+            candidates.append({
+                'candidate_id': cd.get('candidate_id'),
+                'kind': cd.get('kind'),
+                'form': cd.get('form'),
+                'support_status': cd.get('support_status'),
+                'proposed_by': (
+                    f"{cd.get('proposer_type', '')}:{cd.get('proposer_id', '')}"
+                ),
+                'catalog_id': c.get('id'),
+            })
+    coverage: dict[str, dict] = {}
+    # T06: the PER-HIT ledger is what coverage counts (the poem-keyed
+    # occurrence ledger is legacy compatibility only)
+    hit_ledger = ws / 'corpus' / 'hit-assessments.jsonl'
+    hit_rows = _read_jsonl(hit_ledger) if hit_ledger.exists() else []
+    for a in hit_rows:
+        entry = coverage.setdefault(a.get('object_address_id') or '', {
+            'assessed_hits': 0, 'accepted': 0, 'rejected': 0, 'ambiguous': 0,
+        })
+        entry['assessed_hits'] += 1
+        if a.get('decision') in entry:
+            entry[a['decision']] += 1
+    governed = sum(1 for o in operations if o.get('situation_id'))
+    return {
+        'situations': [
+            {
+                'id': s.get('id'),
+                'verbatim_hunch': s.get('verbatim_hunch'),
+                'status': s.get('status'),
+                'actor': s.get('actor'),
+            }
+            for s in situations
+        ],
+        'candidates': candidates,
+        'reviews': [
+            {
+                'candidate_id': r.get('candidate_id'),
+                'decision': r.get('decision'),
+                'actor': r.get('actor'),
+                'catalog_id': r.get('catalog_id'),
+            }
+            for r in reviews if r.get('catalog_id') in live_ids
+        ],
+        'operations_governed': governed,
+        'operations_unframed': len(operations) - governed,
+        'coverage': coverage,
+    }
+
+
+def _assess_study_state_inner(ws, card_box: dict):
+    """Pre-W09B state machine (fills card_box['card'] with the inquiry card)."""
     ws = Path(ws)
     situations = _read_jsonl(ws / 'research' / 'research-situations.jsonl')
     catalogs = _read_jsonl(ws / 'research' / 'inquiry-catalogs.jsonl')
@@ -59,6 +116,10 @@ def assess_study_state(ws):
         if f.get('operation_or_construction')
         and f['operation_or_construction'] not in stored_op_ids
     )
+
+    # W09B: the full inquiry card rides on every status response
+    inquiry = _inquiry_card(ws, situations, catalogs, reviews, operations, assessments)
+    card_box['card'] = inquiry
 
     chain = {
         'situations': len(active),
@@ -171,3 +232,11 @@ def assess_study_state(ws):
         'forbidden': 'field/object promotion or analysis',
         'chain': chain,
     }
+
+
+def assess_study_state(ws):
+    """Return state/suggestion/forbidden/chain + the W09B inquiry card."""
+    box: dict = {}
+    result = _assess_study_state_inner(ws, box)
+    result['inquiry'] = box.get('card')
+    return result
