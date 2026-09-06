@@ -4,6 +4,14 @@
 
 ## Canonical execution order
 
+Current verified progress as of 2026-09-06:
+
+- Last completed row: W09B (`3d0e01131 Ontograph W09B: render inquiry history`).
+- First remaining row: U06.
+- Local verification after this audit: `.venv/Scripts/python.exe -m pytest -q` from `ganjoor-ontograph/` reports 324 passed, 10 skipped, 1 xfailed; `git diff --check` passes.
+- The historical `ganjoor-ontograph/implementation/IMPLEMENTATION_LEDGER.md` is not updated for the OpenSpec W/U continuation. Use git commits plus this task file for post-amendment progress.
+- Do not run implementation and independent QA in the same context. Implementation follows one row per turn; QA should be read-only and start from this file, `V0_2_HERMES_EXECUTION_SPEC.md`, and the latest handoff.
+
 ```text
 T01–T13
 → U03(base schemas only)
@@ -26,99 +34,105 @@ Overrides:
 
 ## Trust and base-record prerequisites
 
-- [ ] Execute T01–T13 exactly as specified. Do not start W work against poem-keyed assessments, unstable hits, ephemeral operations, or live-workspace release rendering.
-- [ ] Execute amended U03 after T13: add schema-versioned ResearchSituation and Seed records, validation, append-only persistence, invalid-record tests, and generic `record add/show/list`; do not build `inquire` yet.
+- [x] Execute T01–T13 exactly as specified. Do not start W work against poem-keyed assessments, unstable hits, ephemeral operations, or live-workspace release rendering.
+- [x] Execute amended U03 after T13: add schema-versioned ResearchSituation and Seed records, validation, append-only persistence, invalid-record tests, and generic `record add/show/list`; do not build `inquire` yet.
 
 ## Inquiry rows
 
 ### W01 — inquiry record schemas and isolated stores
 
-- [ ] Test first: an InquiryCatalog and InquiryReview round-trip with schema versions; candidate files are invisible to `_anchors_for`, census loaders, and active object loaders; generic `record add` refuses machine-managed stores.
-- [ ] Add dataclasses/validators/readers for InquiryCatalog, InquiryReview, and candidate evidence receipts plus append-only JSONL paths and tolerant readers. Do not touch release collection yet.
-- [ ] Verify focused schema/store tests, full suite, diff check; commit `Ontograph W01: add isolated inquiry records`.
+- [x] Test first: an InquiryCatalog and InquiryReview round-trip with schema versions; candidate files are invisible to `_anchors_for`, census loaders, and active object loaders; generic `record add` refuses machine-managed stores.
+- [x] Add dataclasses/validators/readers for InquiryCatalog, InquiryReview, and candidate evidence receipts plus append-only JSONL paths and tolerant readers. Do not touch release collection yet.
+- [x] Verify focused schema/store tests, full suite, diff check; commit `Ontograph W01: add isolated inquiry records`.
 
 ### W02 — lossless hunch and proposal parser
 
-- [ ] Test first: an English-only hunch preserves verbatim text and yields `needs-vocabulary`; an attributed Persian proposal parses; missing proposer/rationale, unknown kinds, and purported engine-generated contrast candidates fail.
-- [ ] Add pure functions in `inquiry.py` for display normalization, script/language observations, ResearchSituation field construction, and YAML/JSON proposal validation. No index access or CLI write in this row.
-- [ ] Verify and commit `Ontograph W02: parse attributed inquiry proposals`.
+- [x] Test first: an English-only hunch preserves verbatim text and yields `needs-vocabulary`; an attributed Persian proposal parses; missing proposer/rationale, unknown kinds, and purported engine-generated contrast candidates fail.
+- [x] Add pure functions in `inquiry.py` for display normalization, script/language observations, ResearchSituation field construction, and YAML/JSON proposal validation. No index access or CLI write in this row.
+- [x] Verify and commit `Ontograph W02: parse attributed inquiry proposals`.
 
 ### W03 — `inquire` create CLI and atomic persistence
 
-- [ ] Test first: `ontograph inquire <study> --hunch ... [--file ...] --json` writes one ResearchSituation and one candidate InquiryCatalog atomically, emits one JSON object, and changes no field/object/assessment/operation state; invalid input writes nothing.
-- [ ] Add the create form of `inquire`; emit a review-template path/content and exact next action. Do not add corpus support or review actions yet.
-- [ ] Verify and commit `Ontograph W03: persist inquiry intake`.
+- [x] Test first: `ontograph inquire <study> --hunch ... [--file ...] --json` writes one ResearchSituation and one candidate InquiryCatalog atomically, emits one JSON object, and changes no field/object/assessment/operation state; invalid input writes nothing.
+- [x] Add the create form of `inquire`; emit a review-template path/content and exact next action. Do not add corpus support or review actions yet.
+- [x] Verify and commit `Ontograph W03: persist inquiry intake`.
 
 ### W04A — corpus support and lexical-neighbor computation
 
-- [ ] Test first: fixture supplied exact/phrase forms return hand-checked counts and stable examples; zero support remains explicit; English tokens are not queried as Persian motifs; neighbor results pin snapshot/scope/window/filter versions; changed field/snapshot stales the receipt.
-- [ ] Implement pure cached-index support queries and deterministic lexical-neighbor discovery. Engine output kind is only `lexical-neighbor`; default ordering is declared retrieval order and never relation strength. Do not change the CLI.
-- [ ] Verify scan/index equivalence for support forms, full suite, diff check; commit `Ontograph W04A: compute candidate support`.
+- [x] Test first: fixture supplied exact/phrase forms return hand-checked counts and stable examples; zero support remains explicit; English tokens are not queried as Persian motifs; neighbor results pin snapshot/scope/window/filter versions; changed field/snapshot stales the receipt.
+- [x] Implement pure cached-index support queries and deterministic lexical-neighbor discovery. Engine output kind is only `lexical-neighbor`; default ordering is declared retrieval order and never relation strength. Do not change the CLI.
+- [x] Verify scan/index equivalence for support forms, full suite, diff check; commit `Ontograph W04A: compute candidate support`.
 
 ### W04B — inquiry refresh CLI
 
-- [ ] Test first: `ontograph inquire <study> --refresh <catalog-id> --json` appends one superseding verified catalog; stale/unknown/mixed-situation input writes nothing; stdout is one JSON object.
-- [ ] Wire only W04A's verifier to refresh and emit the review template/next command. Never rewrite the original catalog.
-- [ ] Verify and commit `Ontograph W04B: refresh inquiry evidence`.
+- [x] Test first: `ontograph inquire <study> --refresh <catalog-id> --json` appends one superseding verified catalog; stale/unknown/mixed-situation input writes nothing; stdout is one JSON object.
+- [x] Wire only W04A's verifier to refresh and emit the review template/next command. Never rewrite the original catalog.
+- [x] Verify and commit `Ontograph W04B: refresh inquiry evidence`.
 
 ### W05 — atomic human review service
 
-- [ ] Test first: accept/reject/defer/revise/split decisions append history; supported acceptance atomically creates Seed/Object Address/LexicalAnchor; review creates no assessment; agent-attributed, stale, duplicate, mixed-situation, and zero-support ordinary acceptance all fail without partial writes.
-- [ ] Implement the pure review/promotion service through the same object/anchor validators introduced by T02/T03. `accept-unsupported` requires human rationale and preserves unsupported state.
-- [ ] Verify and commit `Ontograph W05: govern candidate promotion`.
+- [x] Test first: accept/reject/defer/revise/split decisions append history; supported acceptance atomically creates Seed/Object Address/LexicalAnchor; review creates no assessment; agent-attributed, stale, duplicate, mixed-situation, and zero-support ordinary acceptance all fail without partial writes.
+- [x] Implement the pure review/promotion service through the same object/anchor validators introduced by T02/T03. `accept-unsupported` requires human rationale and preserves unsupported state.
+- [x] Verify and commit `Ontograph W05: govern candidate promotion`.
 
 ### W06 — review CLI and direct-route guard
 
-- [ ] Test first: `ontograph inquire <study> --review decisions.json --json` reports promoted/rejected/deferred IDs; direct `object add`, `object anchor add`, and generic record routes cannot bypass review in a governed workspace; legacy compatibility behavior is explicit.
-- [ ] Add review CLI, atomic staging/write, human actor/confirmation receipt, and equivalent confirmation reference for deliberate direct object routes. Emit the next walk command for each promoted object.
-- [ ] Verify and commit `Ontograph W06: expose reviewed object promotion`.
+- [x] Test first: `ontograph inquire <study> --review decisions.json --json` reports promoted/rejected/deferred IDs; direct `object add`, `object anchor add`, and generic record routes cannot bypass review in a governed workspace; legacy compatibility behavior is explicit.
+- [x] Add review CLI, atomic staging/write, human actor/confirmation receipt, and equivalent confirmation reference for deliberate direct object routes. Emit the next walk command for each promoted object.
+- [x] Verify and commit `Ontograph W06: expose reviewed object promotion`.
 
 ## Workflow integration rows
 
 ### U01 and U02 prerequisites
 
-- [ ] Execute U01 with the amended decision table in the execution-spec amendment: a fresh study suggests inquiry, not object census; candidate/review/staleness states have legal next actions.
-- [ ] Execute U02 source return. Its poem/hit coordinates are the resolution target for W08 evidence cues.
+- [x] Execute U01 with the amended decision table in the execution-spec amendment: a fresh study suggests inquiry, not object census; candidate/review/staleness states have legal next actions.
+- [x] Execute U02 source return. Its poem/hit coordinates are the resolution target for W08 evidence cues.
 
 ### W07A — operation inquiry schema and selector
 
-- [ ] Test first: OperationRecord schema 3 round-trips situation fields; tolerant readers mark old rows `legacy-unframed`; a pure selector inherits one active situation, refuses zero, and refuses multiple without explicit ID before calling a computation spy.
-- [ ] Add only the schema/tolerant reader and pure situation-selection/preflight service. Do not wire verbs or status yet.
-- [ ] Verify and commit `Ontograph W07A: define governed operation context`.
+- [x] Test first: OperationRecord schema 3 round-trips situation fields; tolerant readers mark old rows `legacy-unframed`; a pure selector inherits one active situation, refuses zero, and refuses multiple without explicit ID before calling a computation spy.
+- [x] Add only the schema/tolerant reader and pure situation-selection/preflight service. Do not wire verbs or status yet.
+- [x] Verify and commit `Ontograph W07A: define governed operation context`.
 
 ### W07B — governed command and evidence wiring
 
-- [ ] Test first: Field construction and every analytical command use the shared preflight; legacy-unframed operations cannot support higher records/release; status shows the full chain and orphan/stale records; every refusal occurs before computation/write.
-- [ ] Wire W07A into governed commands, higher-record eligibility validation, and status. Never retro-link an old record.
-- [ ] Verify all command spies and commit `Ontograph W07B: bind operations to inquiry`.
+- [x] Test first: Field construction and every analytical command use the shared preflight; legacy-unframed operations cannot support higher records/release; status shows the full chain and orphan/stale records; every refusal occurs before computation/write.
+- [x] Wire W07A into governed commands, higher-record eligibility validation, and status. Never retro-link an old record.
+- [x] Verify all command spies and commit `Ontograph W07B: bind operations to inquiry`.
 
 ### W08 — walk evidence tray and candidate encounter
 
-- [ ] Test first: every displayed cue is actually present in the fixture verse/couplet and resolves through `source show`; cues never change `a/r/u`; `c:<candidate-id>` writes only a proposal event; stale hit/catalog scripts fail atomically; canonical stable-ID 5/1/1 replay is unchanged.
-- [ ] Add situation selection, reviewed-candidate/lexical cue tray, identity-based candidate encounter action, and four-way completion summary to the T07/T08 walk state machine. `done` remains a stop, not an aggregation or completeness override.
-- [ ] Verify all Gate C actions plus cue tests; commit `Ontograph W08: add inquiry evidence to walk`.
+- [x] Test first: every displayed cue is actually present in the fixture verse/couplet and resolves through `source show`; cues never change `a/r/u`; `c:<candidate-id>` writes only a proposal event; stale hit/catalog scripts fail atomically; canonical stable-ID 5/1/1 replay is unchanged.
+- [x] Add situation selection, reviewed-candidate/lexical cue tray, identity-based candidate encounter action, and four-way completion summary to the T07/T08 walk state machine. `done` remains a stop, not an aggregation or completeness override.
+- [x] Verify all Gate C actions plus cue tests; commit `Ontograph W08: add inquiry evidence to walk`.
 
 ### U04, U05, then W09A/W09B
 
-- [ ] Execute U04 and U05 after W08 so CRUD/result-card validators can cover inquiry provenance and forbid ungoverned supporting records.
+- [x] Execute U04 and U05 after W08 so CRUD/result-card validators can cover inquiry provenance and forbid ungoverned supporting records.
 
 ### W09A — inquiry release collection and verification
 
-- [ ] Test first: a release contains ResearchSituations, Seeds, InquiryCatalogs, InquiryReviews, and candidate encounter events; empty types are explicit; copied verify succeeds and reference/hash tampering fails.
-- [ ] Extend only the release collector/layout and standalone verifier. Do not change Markdown/HTML rendering.
-- [ ] Verify Gate D fixtures and commit `Ontograph W09A: collect inquiry history`.
+- [x] Test first: a release contains ResearchSituations, Seeds, InquiryCatalogs, InquiryReviews, and candidate encounter events; empty types are explicit; copied verify succeeds and reference/hash tampering fails.
+- [x] Extend only the release collector/layout and standalone verifier. Do not change Markdown/HTML rendering.
+- [x] Verify Gate D fixtures and commit `Ontograph W09A: collect inquiry history`.
 
 ### W09B — inquiry status cards and reports
 
-- [ ] Test first: status and staged-only Markdown/HTML show review state, unsupported/stale entries, assessment coverage, and provenance links exactly as stored; renderer-computation spies remain untouched.
-- [ ] Add status cards and report sections from W09A staged records only. No descriptive co-incidence grid is added.
-- [ ] Verify Gate E fixture and commit `Ontograph W09B: render inquiry history`.
+- [x] Test first: status and staged-only Markdown/HTML show review state, unsupported/stale entries, assessment coverage, and provenance links exactly as stored; renderer-computation spies remain untouched.
+- [x] Add status cards and report sections from W09A staged records only. No descriptive co-incidence grid is added.
+- [x] Verify Gate E fixture and commit `Ontograph W09B: render inquiry history`.
 
 ## Finish v0.1.2 and Gate G
 
-- [ ] Execute U06–U10. Skill/README quickstart becomes `study new → inquire → field/refresh → review → walk → assessed-full operation → source return → Finding → release`; agent prepares files and runs commands, researcher supplies decisions.
-- [ ] Execute U11 on a copy/continuation-safe Rostam workspace. Required handoff: verbatim hunch; candidate and unsupported lists; human review receipt; governed object catalog with real support; at least one fully driven walk; ambiguity/incompleteness; source tray; Finding eligibility; rendered self-contained report; timings; comparison to the original agent-label draft. Only Mohammad passes Gate G.
-- [ ] Execute U12 only after Gate G approval.
+Resume implementation here. Each U row is one implementation turn and one commit.
+
+- [ ] **U06 — researcher skill:** update the skill, references, templates, and settings for the governed inquire-first route. Verify with a fresh-session scripted fixture replay; the agent prepares files/runs commands and the researcher supplies semantic review and occurrence decisions.
+- [ ] **U07 — documentation:** rewrite README/runbook, migration guide, and changelog so the quickstart is verbatim `study new → inquire → field/refresh → review → walk → assessed-full operation → source return → Finding → release`.
+- [ ] **U08 — packaging:** complete package metadata and dev dependency group; build wheel and sdist, then run a clean-wheel smoke test.
+- [ ] **U09 — CI:** add Windows/Ubuntu × Python 3.10/3.12 coverage and close Gate F from actual CI-equivalent commands.
+- [ ] **U10 — pinned fast path:** implement the clean-git corpus cache key from commit SHA + manifest hash + cache schema; use a full signal or explicit refusal for dirty/non-git corpora. Verify the unchanged warm command target of ≤2s, or record a user-approved measured exception.
+- [ ] **U11 — Gate G candidate:** execute the ready-made flow on a copy/continuation-safe Rostam workspace. Handoff must include the verbatim hunch, candidate and unsupported lists, human review receipt, governed objects with real support, at least one fully driven walk, ambiguity/incompleteness, source tray, Finding eligibility, self-contained report, timings, and comparison with the original 15-label draft. Only Mohammad may pass Gate G.
+- [ ] **U12 — v0.1.2 release:** execute only after explicit Gate G approval; re-run Gates A–G and verify version/tag consistency.
 
 ## v0.2 relation/mapping-first rows
 
