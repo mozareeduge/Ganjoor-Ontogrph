@@ -244,6 +244,7 @@ def _study_new(args) -> dict:
 
 def _field_build(args) -> dict:
     ws = _require_workspace(args)
+    situation_id = _preflight_situation(ws, args)
     if args.category:
         raise CLIError(
             "--category is not supported in v0.1 (ScopeSpec has no category "
@@ -272,18 +273,72 @@ def _field_build(args) -> dict:
                 f"derived: {str(charter.derived).lower()}",
                 f"version: {charter.version}",
                 f"poem_count: {len(poem_ids)}",
+                # W07B: governed field construction records its situation
+                f"situation_id: {situation_id}" if situation_id else "",
             ]
         )
         + "\n",
         encoding="utf-8",
     )
-    return {"study_id": args.study_id, "poem_count": len(poem_ids), "poem_ids": poem_ids}
+    result = {"study_id": args.study_id, "poem_count": len(poem_ids), "poem_ids": poem_ids}
+    if situation_id:
+        result["situation_id"] = situation_id
+    return result
 
 
 def _workspace_is_governed(ws: Path) -> bool:
     """W06 (Amendment §19.2): a workspace with inquiry history is GOVERNED —
     object promotion must cite a human review or confirmation receipt."""
     return (ws / "research" / "inquiry-catalogs.jsonl").exists()
+
+
+def _preflight_situation(ws: Path, args) -> str | None:
+    """W07B shared preflight (Amendment §19.2/§19.6): governed workspaces
+    run under an active ResearchSituation — inherit one, refuse zero/many/
+    unknown BEFORE any computation or write. Ungoverned workspaces return
+    None (the legacy-unframed route stays legal and untouched)."""
+    from ontograph.w07 import SituationResolutionError, select_governed_situation
+
+    try:
+        return select_governed_situation(ws, getattr(args, "situation", None))
+    except SituationResolutionError as e:
+        raise CLIError(str(e))
+
+
+def _persist_governed_operation(
+    ws: Path, study_id: str, operation_type: str, parameters: dict,
+    result: dict, hits: list, records: list, situation_id: str | None,
+) -> str:
+    """W07B: persist the OperationRecord BEFORE the command returns its
+    result (T09 discipline, §19.6). Governed records carry situation_id +
+    inquiry_status=governed; returns the record id for stdout."""
+    from ontograph.operations import build_operation_record, persist_operation_record
+
+    poem_paths = {}
+    for r in records:
+        rel = getattr(r, "path", "")
+        if rel:
+            # index records may carry Path objects; the manifest wants
+            # repository-relative POSIX strings
+            poem_paths[r.poem_id] = str(rel).replace("\\", "/")
+    scope_path = ws / "field" / "scope.json"
+    scope_spec = json.loads(scope_path.read_text(encoding="utf-8")) if scope_path.exists() else {}
+    snapshot = next((h.corpus_snapshot_id for h in hits if h.corpus_snapshot_id), None) or ""
+    record = build_operation_record(
+        study_id=study_id,
+        operation_type=operation_type,
+        operation_version="1.0.0",
+        parameters=parameters,
+        result=result,
+        hits=hits,
+        corpus_snapshot_id=snapshot,
+        workspace=ws,
+        scope_spec=scope_spec,
+        poem_paths=poem_paths,
+        situation_id=situation_id,
+    )
+    persist_operation_record(ws, record)
+    return record["id"]
 
 
 def _object_add(args) -> dict:
@@ -406,12 +461,16 @@ from ontograph.walk import run_walk
 
 def _walk(args) -> dict:
     ws = _require_workspace(args)
+    situation_id = _preflight_situation(ws, args)
     corpus_root = _resolve_corpus_root(args, ws)
-    return run_walk(
+    result = run_walk(
         ws=ws, study_id=args.study_id, object_address=args.object,
         corpus_root=corpus_root, sample_size=args.sample, seed=args.seed,
         script_path=args.script, assessor=args.assessor,
     )
+    if situation_id:
+        result["situation_id"] = situation_id
+    return result
 
 
 def _calibrate(args) -> dict:
@@ -434,6 +493,7 @@ def _calibrate(args) -> dict:
 
 def _census(args) -> dict:
     ws = _require_workspace(args)
+    situation_id = _preflight_situation(ws, args)
     conn, records = _open_cached_index(args, ws)
     try:
         hits = census_from_index(conn, records, _anchors_for(ws, args.object))
@@ -443,7 +503,14 @@ def _census(args) -> dict:
             hits = [h for h in hits if h.poem_id in allowed]
         if args.mode == "anchor":
             poems = sorted({h.poem_id for h in hits})
-            return {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
+            result = {"object_address": args.object, "mode": "anchor", "hit_count": len(hits), "poem_count": len(poems), "poems": poems}
+            # W07B: governed operations persist BEFORE returning (T09/§19.6)
+            if situation_id:
+                result["operation_record_id"] = _persist_governed_operation(
+                    ws, args.study_id, "census", {"mode": args.mode},
+                    result, hits, records, situation_id,
+                )
+            return result
 
         # T06 governed assessed route: alias warning -> per-hit coverage
         # gate -> poem aggregation (spec §6.5/§8.1.1). Partial review is
@@ -453,7 +520,7 @@ def _census(args) -> dict:
         eligible_poem_ids = {r.poem_id for r in records}
     finally:
         conn.close()
-    return {
+    result = {
         "object_address": args.object, "mode": mode,
         "numerator": len(accepted & eligible_poem_ids),
         "denominator": len(eligible_poem_ids),
@@ -461,12 +528,19 @@ def _census(args) -> dict:
         "accepted_poems": sorted(accepted & eligible_poem_ids),
         "ambiguous_only_poems": sorted(ambiguous_only & eligible_poem_ids),
     }
+    if situation_id:
+        result["operation_record_id"] = _persist_governed_operation(
+            ws, args.study_id, "census", {"mode": mode},
+            result, hits, records, situation_id,
+        )
+    return result
 
 
 def _map_recurrence(args) -> dict:
     if args.unit != "poem":
         raise CLIError(f"unsupported --unit {args.unit!r} in v0.1 (only 'poem' is implemented)")
     ws = _require_workspace(args)
+    situation_id = _preflight_situation(ws, args)
     conn, records = _open_cached_index(args, ws)
     try:
         hits = census_from_index(conn, records, _anchors_for(ws, args.object))
@@ -482,15 +556,22 @@ def _map_recurrence(args) -> dict:
         s = spread(poems_with_object, records)
     finally:
         conn.close()
-    return {
+    result = {
         "object_address": args.object, "mode": mode, "unit": "poem",
         "distinct_poems": s.distinct_poems, "distinct_poets": s.distinct_poets,
         "total_poems": s.total_poems, "total_poets": s.total_poets,
     }
+    if situation_id:
+        result["operation_record_id"] = _persist_governed_operation(
+            ws, args.study_id, "map-recurrence", {"mode": mode, "unit": "poem"},
+            result, hits, records, situation_id,
+        )
+    return result
 
 
 def _companions(args) -> dict:
     ws = _require_workspace(args)
+    situation_id = _preflight_situation(ws, args)
     conn, records = _open_cached_index(args, ws)
     try:
         hits_a = census_from_index(conn, records, _anchors_for(ws, args.object))
@@ -525,11 +606,17 @@ def _companions(args) -> dict:
             out["lift_note"] = str(e)
     finally:
         conn.close()
+    if situation_id:
+        out["operation_record_id"] = _persist_governed_operation(
+            ws, args.study_id, "companions", {"mode": mode_a, "scale": args.scale},
+            out, hits_a + hits_b, records, situation_id,
+        )
     return out
 
 
 def _ablate(args) -> dict:
     ws = _require_workspace(args)
+    situation_id = _preflight_situation(ws, args)
     if not args.remove.startswith("poet:"):
         raise CLIError("unsupported --remove spec in v0.1 (only 'poet:<slug>' is implemented)")
     if not args.rerun.startswith("relation:"):
@@ -565,11 +652,18 @@ def _ablate(args) -> dict:
         conn.close()
     # asdict(result) may itself carry the engine's legacy mode constant;
     # the canonical CLI mode (T06 §19) must win -- spread it first.
-    return {"removed": args.remove, "relation": f"{addr_a}-{addr_b}", **asdict(result), "mode": mode_a}
+    out = {"removed": args.remove, "relation": f"{addr_a}-{addr_b}", **asdict(result), "mode": mode_a}
+    if situation_id:
+        out["operation_record_id"] = _persist_governed_operation(
+            ws, args.study_id, "ablate", {"mode": mode_a, "remove": args.remove},
+            out, hits_a + hits_b, records, situation_id,
+        )
+    return out
 
 
 def _compare(args) -> dict:
     ws = _require_workspace(args)
+    situation_id = _preflight_situation(ws, args)
     if len(args.fields) != 2:
         raise CLIError("--field must be given exactly twice: --field poet:X --field poet:Y")
     for f in args.fields:
@@ -594,7 +688,13 @@ def _compare(args) -> dict:
         result = compare_fields(hit_poems & poems_a, len(poems_a), hit_poems & poems_b, len(poems_b))
     finally:
         conn.close()
-    return {"object_address": args.object, "mode": mode, "field_a": field_a, "field_b": field_b, **asdict(result)}
+    out = {"object_address": args.object, "mode": mode, "field_a": field_a, "field_b": field_b, **asdict(result)}
+    if situation_id:
+        out["operation_record_id"] = _persist_governed_operation(
+            ws, args.study_id, "compare", {"mode": mode, "fields": args.fields},
+            out, hits, records, situation_id,
+        )
+    return out
 
 
 def _validate(args) -> dict:
@@ -973,6 +1073,9 @@ def _build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--workspaces-dir", default="ontograph-workspaces")
     common.add_argument("--json", action="store_true", help="pretty-print the result object")
+    # W07B (§19.4): --situation on governed commands; sole-situation
+    # inheritance avoids typing it, multiple actives require it explicitly.
+    common.add_argument("--situation", default=None)
 
     # Ledger row P9.1: --corpus-root is optional on every corpus-consuming
     # verb — an explicit flag overrides, otherwise the resolver falls back
@@ -1083,7 +1186,7 @@ def _build_parser() -> argparse.ArgumentParser:
     inq.add_argument("--persian-form", action="append", default=[])
     inq.add_argument("--refresh", dest="refresh_catalog_id")  # W04B: verify an existing catalog
     inq.add_argument("--review")  # W06: decisions file for human review
-    inq.add_argument("--situation")  # W06: situation for --review
+    # (--situation comes from `common` since W07B: same flag, same meaning)
     inq.add_argument("--review-actor")  # W06: human reviewer id
     inq.add_argument("--receipt")  # W06: human confirmation receipt id
     inq.set_defaults(func=_inquire)

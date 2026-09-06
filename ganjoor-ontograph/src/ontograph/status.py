@@ -48,6 +48,18 @@ def assess_study_state(ws):
     else:
         live = []
 
+    governed_ops = [o for o in operations if o.get('situation_id')]
+    live_ids = {c.get('id') for c in live}
+    # W07B: provenance hygiene counts — stale reviews point at superseded
+    # catalogs; orphan findings cite operations that no longer exist.
+    stale_reviews = sum(1 for r in reviews if r.get('catalog_id') not in live_ids)
+    stored_op_ids = {o.get('id') for o in operations}
+    orphan_findings = sum(
+        1 for f in findings
+        if f.get('operation_or_construction')
+        and f['operation_or_construction'] not in stored_op_ids
+    )
+
     chain = {
         'situations': len(active),
         'live_catalogs': len(live),
@@ -55,10 +67,14 @@ def assess_study_state(ws):
         'objects': len(objects),
         'assessed_objects': len({a.get('object_address') for a in assessments}),
         'operations': len(operations),
+        'operations_governed': len(governed_ops),
+        'operations_unframed': len(operations) - len(governed_ops),
         'findings': len(findings),
+        'stale': stale_reviews,
+        'orphans': orphan_findings,
     }
-
-    governed_ops = [o for o in operations if o.get('situation_id')]
+    # legacy-unframed operations cannot support higher records or release
+    # (§19.2/§19.6) — surfaced as their own state, distinct from no-situation.
     if operations and not governed_ops and not findings:
         return {
             'state': 'legacy-unframed',
