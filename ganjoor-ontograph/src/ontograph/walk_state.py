@@ -43,6 +43,10 @@ class WalkState:
     resume_ledger: list[HitOccurrenceAssessment] = field(default_factory=list)
     anchors: list = field(default_factory=list)  # active anchors (T08 narrow/split)
     candidate_pool: list[AnchorHit] = field(default_factory=list)  # T08 widen
+    # W08: live inquiry catalogs + reviews feed the evidence tray and the
+    # c:<candidate-id> encounter action
+    catalogs: list = field(default_factory=list)
+    reviews: list = field(default_factory=list)
 
 
 @dataclass
@@ -61,19 +65,24 @@ class WalkResult:
     sample: list[AnchorHit] = field(default_factory=list)  # sample after widen
     context_level: int | None = None
     context: dict | None = None
+    # W08: candidate-encounter proposals (never assessments, never promotions)
+    candidate_encounters: list[dict] = field(default_factory=list)
+    # W08: four-way completion summary companion -- unassessed eligible hits
+    unassessed: int = 0
 
 
 @dataclass
 class WalkAction:
     """One interactive walk action (spec §6.3 action grammar, T08)."""
 
-    token: str  # a|r|u|n|s|t|w|x|?1..?4|done
+    token: str  # a|r|u|n|s|t|w|x|?1..?4|c|done
     hit_id: str = ""
     form: str = ""  # n: replacement anchor form
     reason: str = ""  # n/s/t: required rationale
     new_object_id: str = ""  # s: second object address id
     note: str = ""  # t: trace note
     rationale: str = ""  # accepted alias for reason (n/s)
+    candidate_id: str = ""  # c: candidate-encounter proposal (W08)
 
     def __post_init__(self) -> None:
         if not self.reason and self.rationale:
@@ -85,6 +94,42 @@ def apply_action(state: WalkState, action: WalkAction) -> WalkResult:
     are first-class, append-only events (spec §51) -- never silent edits."""
     hit = next((h for h in state.sample if h.id == action.hit_id), None)
     events: list[dict] = []
+
+    if action.token == "c":
+        # W08 (§19.5): pin an append-only candidate-encounter proposal to
+        # the stable hit. It CANNOT promote, assess, trace, map, or relate
+        # -- the hit stays undecided and no assessment row is written.
+        if hit is None:
+            raise ValueError(
+                f"unknown anchor_hit_id: {action.hit_id!r} -- scripts must "
+                f"name hit IDs from corpus snapshot {state.corpus_snapshot_id}"
+            )
+        live_ids: set[str] = set()
+        superseded_catalog_ids = {c.supersedes for c in state.catalogs if c.supersedes}
+        for catalog in state.catalogs:
+            if catalog.id in superseded_catalog_ids:
+                continue  # a superseded catalog's candidates are no longer live
+            for candidate in catalog.candidates:
+                live_ids.add(candidate.candidate_id)
+        if action.candidate_id not in live_ids:
+            raise ValueError(
+                f"unknown/stale candidate_id: {action.candidate_id!r} -- "
+                f"candidate encounters may only pin LIVE catalog candidates"
+            )
+        events.append({
+            "kind": "walk-candidate_encounter",
+            "hit_id": action.hit_id,
+            "candidate_id": action.candidate_id,
+        })
+        return WalkResult(
+            accepted=0, rejected=0, ambiguous=0,
+            undecided=[h.id for h in state.sample],
+            candidate_encounters=[{
+                "hit_id": action.hit_id,
+                "candidate_id": action.candidate_id,
+            }],
+            events=events, sample=list(state.sample),
+        )
 
     if action.token == "n":
         if not action.form or not action.reason:
@@ -225,9 +270,17 @@ def run_walk(state: WalkState, responses: list[WalkResponse]) -> WalkResult:
         h.id for h in state.sample
         if h.id not in decisions and h.id not in assessed_ids
     ]
+    # W08 four-way completion summary: ambiguity is assessed and stays
+    # visible; unassessed is INCOMPLETE -- `done` may stop but never
+    # aggregates or manufactures completeness (§19.5).
+    unassessed = len(state.sample) - (accepted + rejected + ambiguous) - len(
+        [h for h in state.sample if h.id in assessed_ids
+         and h.id not in decisions]
+    )
     return WalkResult(
         accepted=accepted, rejected=rejected, ambiguous=ambiguous,
         undecided=undecided, ledger_rows=ledger_rows,
+        unassessed=max(0, unassessed),
     )
 
 

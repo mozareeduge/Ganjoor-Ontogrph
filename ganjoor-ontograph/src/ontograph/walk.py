@@ -101,6 +101,7 @@ def run_walk(
     traces = 0
     decisions: list[OccurrenceAssessment] = []
     hit_rows: list[tuple] = []  # (AnchorHit, decision) for the per-hit ledger (T06)
+    encounters: list[dict] = []  # W08: candidate-encounter proposals
     undecided: list[int] = []
     seq = _next_event_seq(ws, study_id)
 
@@ -153,6 +154,26 @@ def run_walk(
             seq += 1
             continue
 
+        if token.startswith("c:"):
+            # W08 (§19.5): candidate-encounter proposal pinned to the stable
+            # hit. Append-only event ONLY: no assessment, no promotion; the
+            # hit stays undecided. Unknown/stale candidate IDs fail BEFORE
+            # anything is written for this walk (validated below, before the
+            # batched write-out).
+            candidate_id = token.split(":", 1)[1].strip()
+            if not candidate_id:
+                raise CLIError("c requires a candidate id: 'c:<candidate-id>'")
+            encounters.append({"poem_id": hit.poem_id, "candidate_id": candidate_id})
+            events.append({
+                "event_type": "candidate_encounter",
+                "target_ids": [candidate_id],
+                "poem_id": hit.poem_id,
+                "anchor_hit_id": hit.id,
+            })
+            seq += 1
+            undecided.append(hit.poem_id)
+            continue
+
         if token == "s":
             raise CLIError(
                 "split requires the second object's registration outside the "
@@ -175,6 +196,28 @@ def run_walk(
             break
 
         raise CLIError(f"unrecognized walk response for hit {i + 1}: {token!r}")
+
+    # W08: candidate encounters validate against LIVE catalogs BEFORE any
+    # write-out -- stale/unknown candidate IDs fail atomically (nothing
+    # has been written yet: ledgers and events come below).
+    if encounters:
+        from ontograph.inquiry import read_catalogs
+
+        catalogs = read_catalogs(ws)
+        superseded_ids = {c.supersedes for c in catalogs if c.supersedes}
+        live: set[str] = set()
+        for c in catalogs:
+            if c.id in superseded_ids:
+                continue  # a superseded catalog's candidates are no longer live
+            for cd in c.candidates:
+                live.add(cd.candidate_id)
+        stale = sorted({e["candidate_id"] for e in encounters} - live)
+        if stale:
+            raise CLIError(
+                f"unknown/stale candidate_id(s): {stale} -- candidate "
+                f"encounters may only pin LIVE catalog candidates "
+                f"(Amendment §19.5); nothing was written"
+            )
 
     # -- ONE batched write-out: decisions through the same ledger `assess`
     #    writes; undecided listed, never imputed --
@@ -213,12 +256,19 @@ def run_walk(
     for a in decisions:
         summary[a.decision] += 1
 
+    # W08 four-way completion summary (§19.5): `done`/undecided hits stay
+    # unassessed and visible -- a stop never manufactures completeness.
+    assessed_hits = len({h.id for h, _ in hit_rows})
+    unassessed = len(sample) - assessed_hits
+
     return {
         "object_address": object_address,
         "sample_size": len(sample),
         "summary": summary,
+        "unassessed": max(0, unassessed),
         "undecided": sorted(undecided),
         "traces": traces,
+        "candidate_encounters": encounters,
         "events": events,
     }
 
