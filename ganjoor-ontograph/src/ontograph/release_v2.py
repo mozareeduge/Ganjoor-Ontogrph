@@ -125,3 +125,65 @@ def collect_release(
             import shutil
 
             shutil.rmtree(staging, ignore_errors=True)
+
+
+# --- W09A (Amendment §19.7): inquiry release collection -------------------------
+
+INQUIRY_SOURCES = (
+    # (record type, workspace-relative store)
+    ("research-situations", "research/research-situations.jsonl"),
+    ("seeds", "research/seeds.jsonl"),
+    ("inquiry-catalogs", "research/inquiry-catalogs.jsonl"),
+    ("inquiry-reviews", "research/inquiry-reviews.jsonl"),
+)
+
+
+def collect_governed_release(
+    workspace: Path,
+    version: str,
+    study_id: str,
+    corpus_snapshot: dict,
+    field_charter: str = "",
+    field_scope: dict | None = None,
+) -> Path:
+    """W09A: collect the governed release — every §19.7 inquiry store
+    (situations, seeds, catalogs, reviews), the full event log (candidate
+    encounters included), and the OperationRecords, plus the §6.7 layout.
+    Empty types stay explicit empty files. Returns the release directory."""
+    workspace = Path(workspace)
+    payloads: dict[str, list[dict]] = {}
+
+    for rtype, rel in INQUIRY_SOURCES:
+        path = workspace / rel
+        payloads[rtype] = (
+            [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            if path.exists() else []
+        )
+    events_path = workspace / "events" / "events.jsonl"
+    payloads["events"] = (
+        [json.loads(l) for l in events_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if events_path.exists() else []
+    )
+    from ontograph.operations import read_operation_records
+
+    payloads["operations"] = read_operation_records(workspace)
+    # canonical stores: objects/assessments/traces/findings
+    for rtype, rel in (
+        ("object-addresses", "objects/object-addresses.jsonl"),
+        ("occurrence-assessments", "corpus/hit-assessments.jsonl"),
+        ("traces", "research/traces.jsonl"),
+        ("findings", "research/findings.jsonl"),
+    ):
+        path = workspace / rel
+        payloads[rtype] = (
+            [json.loads(l) for l in path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            if path.exists() else []
+        )
+
+    return collect_release(
+        workspace, version=version, study_id=study_id,
+        corpus_snapshot=corpus_snapshot,
+        record_payloads=payloads,
+        field_charter=field_charter,
+        field_scope=field_scope,
+    )

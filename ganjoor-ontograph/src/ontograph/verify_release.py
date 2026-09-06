@@ -67,4 +67,40 @@ def verify_release(release_dir: Path) -> dict:
                 if ref and (release_dir / ref).exists() is False:
                     issues.append(f"release.json reference missing: {ref_key}={ref}")
 
+    # W09A (§19.7): inquiry reference integrity — reviews cite live
+    # catalogs, catalogs cite existing situations, governed operations
+    # cite existing situations. These checks read ONLY release content.
+    def _rows(rel: str) -> list[dict]:
+        p = release_dir / "records" / f"{rel}.jsonl"
+        if not p.exists():
+            return []
+        return [
+            json.loads(l)
+            for l in p.read_text(encoding="utf-8").splitlines() if l.strip()
+        ]
+
+    catalogs = _rows("inquiry-catalogs")
+    reviews = _rows("inquiry-reviews")
+    situations = _rows("research-situations")
+    operations = _rows("operations")
+
+    situation_ids = {r.get("id") for r in situations}
+    for cat in catalogs:
+        if cat.get("situation_id") and cat["situation_id"] not in situation_ids:
+            issues.append(
+                f"inquiry-catalog cites missing situation: {cat.get('id')}"
+            )
+    catalog_ids = {r.get("id") for r in catalogs}
+    for rev in reviews:
+        if rev.get("catalog_id") and rev["catalog_id"] not in catalog_ids:
+            issues.append(
+                f"inquiry-review cites missing catalog: {rev.get('catalog_id')}"
+            )
+    for op in operations:
+        if op.get("inquiry_status") == "governed" and op.get("situation_id") \
+                and op["situation_id"] not in situation_ids:
+            issues.append(
+                f"governed operation cites missing situation: {op.get('id')}"
+            )
+
     return {"valid": not issues, "issues": issues, "files_checked": files_checked}
