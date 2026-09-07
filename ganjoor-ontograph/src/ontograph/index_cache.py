@@ -36,6 +36,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
 import tempfile
 from pathlib import Path
 
@@ -57,29 +58,79 @@ def default_cache_dir() -> Path:
     if env:
         return Path(env)
     return Path.home() / ".cache" / "ontograph" / "index-cache"
+def _git_output(root: Path, *args: str) -> str | None:
+    """Return git output for ``root``, or ``None`` when it is not a repo."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _indexed_inputs_are_tracked(root: Path) -> bool:
+    """Return whether every JSON input the index reads is git-tracked."""
+    tracked = _git_output(root, "ls-files", "-z", "--", "poets")
+    if tracked is None:
+        return False
+    tracked_paths = set(filter(None, tracked.split("\0")))
+    indexed_paths = {
+        path.relative_to(root).as_posix()
+        for path in root.glob("poets/**/*.json")
+    }
+    return indexed_paths <= tracked_paths
+
+def cache_identity(root: str | Path) -> dict:
+    """Return the safe cache identity for a corpus root.
+
+    A clean git checkout can use its immutable commit plus manifest hash,
+    avoiding a full corpus walk on warm opens. Dirty and non-git roots retain
+    the conservative composite signal, which includes path and size as well
+    as mtimes and is therefore never mtime-only.
+    """
+    root = Path(root)
+    manifest_sha256 = hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest()
+    commit_sha = _git_output(root, "rev-parse", "HEAD")
+    status = _git_output(root, "status", "--porcelain")
+    if commit_sha is not None and status == "" and _indexed_inputs_are_tracked(root):
+        return {
+            "kind": "clean-git",
+            "commit_sha": commit_sha,
+            "manifest_sha256": manifest_sha256,
+            "cache_schema_version": CACHE_SCHEMA_VERSION,
+        }
+    return {
+        "kind": "full-signal",
+        "signal": content_signal(root),
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+    }
 
 
 def _shard_fingerprint(root: Path) -> str:
-    """Cheap per-shard (per-poet-directory) content fingerprint: stat-only
-    (no file reads) — a hash over each file's relative path, size, and
-    mtime_ns. Deliberately NOT mtime alone: size and path participate,
-    and the signal as a whole also includes the manifest hash and poem
-    file count (see `content_signal`)."""
-    parts: list[bytes] = []
+    """Hash every corpus file's relative path and bytes.
+
+    This is deliberately the conservative dirty/non-git route: it catches a
+    content edit even if size and mtime are restored, so cache validity never
+    depends on mtime alone.
+    """
+    digest = hashlib.sha256()
     for poet_dir in sorted(root.glob("poets/*")):
         if not poet_dir.is_dir():
             continue
-        for f in sorted(poet_dir.rglob("*")):
-            if not f.is_file():
+        for path in sorted(poet_dir.rglob("*")):
+            if not path.is_file():
                 continue
-            st = f.stat()
-            rel = str(f.relative_to(root)).replace("\\", "/")
-            parts.append(f"{rel}\0{st.st_size}\0{st.st_mtime_ns}\0".encode("utf-8"))
-    h = hashlib.sha256()
-    for p in parts:
-        h.update(p)
-    return h.hexdigest()
-
+            relative = str(path.relative_to(root)).replace("\\", "/")
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+    return digest.hexdigest()
 
 def content_signal(root: str | Path) -> dict:
     """The composite content signal the cache key is derived from."""
@@ -97,15 +148,15 @@ def content_signal(root: str | Path) -> dict:
     }
 
 
-def cache_key(root: str | Path, signal: dict | None = None) -> str:
-    if signal is None:
-        signal = content_signal(root)
-    blob = json.dumps(signal, sort_keys=True, ensure_ascii=False).encode("utf-8")
+def cache_key(root: str | Path, identity: dict | None = None) -> str:
+    if identity is None:
+        identity = cache_identity(root)
+    blob = json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
     return hashlib.sha256(blob).hexdigest()[:32]
 
 
-def _cache_paths(root: str | Path, cache_dir: Path, signal: dict | None = None) -> tuple[Path, Path]:
-    key = cache_key(root, signal)
+def _cache_paths(root: str | Path, cache_dir: Path, identity: dict | None = None) -> tuple[Path, Path]:
+    key = cache_key(root, identity)
     base = f"index-{key}-v{CACHE_SCHEMA_VERSION}"
     return cache_dir / f"{base}.sqlite", cache_dir / f"{base}.meta.json"
 
@@ -129,9 +180,8 @@ def get_or_build_index(
     root = Path(root)
     cache_dir = Path(cache_dir) if cache_dir is not None else default_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    signal = content_signal(root)  # computed once; the fingerprint stat
-    # pass over 132k+ files is the dominant warm-open cost — never paid twice
-    db_path, meta_path = _cache_paths(root, cache_dir, signal)
+    identity = cache_identity(root)
+    db_path, meta_path = _cache_paths(root, cache_dir, identity)
 
     if db_path.exists() and meta_path.exists():
         try:
@@ -141,11 +191,13 @@ def get_or_build_index(
         if (
             isinstance(meta, dict)
             and meta.get("cache_schema_version") == CACHE_SCHEMA_VERSION
-            and meta.get("signal") == signal
+            and meta.get("cache_identity") == identity
+            and meta.get("cache_root") == str(root.resolve())
         ):
             return _open_read_only(db_path), meta["build_manifest"], True
 
     # Miss (no entry, corrupt meta, or content changed) → full rebuild.
+
     fd, tmp_name = tempfile.mkstemp(prefix="ontograph-index-", suffix=".sqlite", dir=str(cache_dir))
     os.close(fd)
     tmp_path = Path(tmp_name)
@@ -154,7 +206,8 @@ def get_or_build_index(
         conn.close()
         meta = {
             "cache_schema_version": CACHE_SCHEMA_VERSION,
-            "signal": signal,
+            "cache_identity": identity,
+            "cache_root": str(root.resolve()),
             "build_manifest": build_manifest,
         }
         os.replace(tmp_path, db_path)

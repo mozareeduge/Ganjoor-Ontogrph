@@ -9,6 +9,7 @@ the checked-in fixture itself is never mutated.
 import json
 import pathlib
 import shutil
+import subprocess
 
 import pytest
 
@@ -161,3 +162,88 @@ def test_content_signal_covers_manifest_count_and_shards(tmp_path, corpus_copy):
     assert len(signal["manifest_sha256"]) == 64
     assert len(signal["shard_fingerprint"]) == 64
     assert signal["root"] == str(corpus_copy.resolve())
+
+
+def _git(repo: pathlib.Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def test_cache_identity_uses_fast_clean_git_and_full_otherwise(tmp_path, corpus_copy, monkeypatch):
+    """Only a clean git corpus may bypass the full content signal."""
+    repo = tmp_path / "git-corpus"
+    shutil.copytree(corpus_copy, repo)
+    _git(repo, "init")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=U10", "-c", "user.email=u10@example.invalid", "commit", "-m", "fixture")
+    cache_dir = _copy_cache_dir(tmp_path)
+
+    conn, _, clean_hit = get_or_build_index(repo, cache_dir=cache_dir)
+    conn.close()
+    assert clean_hit is False
+    clean_meta_path = next(cache_dir.glob("*.meta.json"))
+    clean_meta = json.loads(clean_meta_path.read_text(encoding="utf-8"))
+    assert clean_meta["cache_identity"]["kind"] == "clean-git"
+    assert clean_meta["cache_identity"]["commit_sha"] == _git(repo, "rev-parse", "HEAD")
+    assert clean_meta["cache_identity"]["manifest_sha256"] == content_signal(repo)["manifest_sha256"]
+
+    monkeypatch.setattr(
+        "ontograph.index_cache.content_signal",
+        lambda root: pytest.fail("clean git warm cache must not compute the full signal"),
+    )
+    conn, _, clean_hit = get_or_build_index(repo, cache_dir=cache_dir)
+    conn.close()
+    assert clean_hit is True
+
+    # A tracked edit makes the corpus dirty, so the full content signal is
+    # mandatory. A non-git corpus follows the same conservative path.
+    monkeypatch.undo()
+    poem_path = next((repo / "poets").rglob("*.json"))
+    poem_path.write_text(poem_path.read_text(encoding="utf-8") + " ", encoding="utf-8")
+    conn, _, dirty_hit = get_or_build_index(repo, cache_dir=cache_dir)
+    conn.close()
+    assert dirty_hit is False
+    dirty_meta_path = next(path for path in cache_dir.glob("*.meta.json") if path != clean_meta_path)
+    dirty_meta = json.loads(dirty_meta_path.read_text(encoding="utf-8"))
+    assert dirty_meta["cache_identity"]["kind"] == "full-signal"
+
+    nongit_cache_dir = tmp_path / "nongit-cache"
+    conn, _, _ = get_or_build_index(corpus_copy, cache_dir=nongit_cache_dir)
+    conn.close()
+    nongit_meta = json.loads(next(nongit_cache_dir.glob("*.meta.json")).read_text(encoding="utf-8"))
+    assert nongit_meta["cache_identity"]["kind"] == "full-signal"
+
+def test_clean_git_miss_does_not_validate_legacy_cache_with_full_signal(tmp_path, corpus_copy, monkeypatch):
+    """A clean-git miss rebuilds; it never walks the corpus to trust legacy cache."""
+    cache_dir = _copy_cache_dir(tmp_path)
+    conn, _, legacy_hit = get_or_build_index(corpus_copy, cache_dir=cache_dir)
+    conn.close()
+    assert legacy_hit is False
+
+    _git(corpus_copy, "init")
+    _git(corpus_copy, "add", ".")
+    _git(corpus_copy, "-c", "user.name=U10", "-c", "user.email=u10@example.invalid", "commit", "-m", "fixture")
+    monkeypatch.setattr(
+        "ontograph.index_cache.content_signal",
+        lambda root: pytest.fail("clean git cache misses must not validate legacy full signals"),
+    )
+    conn, _, clean_hit = get_or_build_index(corpus_copy, cache_dir=cache_dir)
+    conn.close()
+    assert clean_hit is False
+
+def test_clean_git_identity_rejects_ignored_untracked_index_input(tmp_path, corpus_copy):
+    """Ignored poem JSON must not hide behind an otherwise clean git status."""
+    (corpus_copy / ".gitignore").write_text("poets/sample1/ignored.json\n", encoding="utf-8")
+    _git(corpus_copy, "init")
+    _git(corpus_copy, "add", ".")
+    _git(corpus_copy, "-c", "user.name=U10", "-c", "user.email=u10@example.invalid", "commit", "-m", "fixture")
+    ignored = next((corpus_copy / "poets" / "sample1").glob("*.json"))
+    (corpus_copy / "poets" / "sample1" / "ignored.json").write_bytes(ignored.read_bytes())
+
+    from ontograph.index_cache import cache_identity
+
+    assert cache_identity(corpus_copy)["kind"] == "full-signal"
