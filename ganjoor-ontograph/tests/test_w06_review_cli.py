@@ -24,12 +24,19 @@ from ontograph.cli import main as cli_main
 from ontograph.inquiry import (
     CandidateEvidenceRef, InquiryCandidate, InquiryCatalog, persist_catalog,
 )
+from ontograph.records_v2 import ResearchSituation, persist_situation
 from ontograph.workspace import new_study
 
 
 def _governed_study(tmp_path: Path) -> tuple[Path, str]:
     fixture = Path(__file__).parent.parent / "fixtures" / "mini-ganjoor"
     study = new_study(tmp_path / "ws", "w06-study", corpus_root=str(fixture))
+    situation = ResearchSituation(
+        study_id="w06-study", verbatim_hunch="mirror hunch",
+        normalized_display_hunch="mirror hunch", actor="mz",
+    )
+    object.__setattr__(situation, "id", "rs-x")
+    persist_situation(study, situation)
     cand = InquiryCandidate(
         candidate_id="cand-ayene", kind="lexical-anchor", form="آینه",
         proposer_type="human", proposer_id="mz", rationale="mirror motif",
@@ -112,8 +119,6 @@ def test_direct_add_allowed_with_confirmation_file(tmp_path: Path) -> None:
 def test_legacy_workspace_keeps_direct_add(tmp_path: Path) -> None:
     """Explicit legacy compatibility (Amendment §19.2): a workspace with
     NO inquiry history is not governed; direct add behaves as before."""
-    from ontograph.workspace import new_study
-
     study = new_study(tmp_path / "ws", "legacy-study")
     import contextlib, io
 

@@ -63,9 +63,16 @@ def _promote_candidate(workspace: Path, catalog, candidate, actor: str, receipt:
     seeds_path = workspace / "research" / "seeds.jsonl"
     events_path = workspace / "events" / "events.jsonl"
     event = {
-        "kind": "inquiry-candidate_promoted",
-        "candidate_id": candidate.candidate_id, "catalog_id": catalog.id,
-        "actor": actor, "receipt": receipt,
+        "id": _new_id("ev"),
+        "study_id": catalog.study_id,
+        "event_type": "inquiry-candidate_promoted",
+        "actor_type": "human",
+        "actor_id": actor,
+        "target_type": "candidate",
+        "target_ids": [candidate.candidate_id],
+        "input_record_ids": [f"catalog:{catalog.id}"],
+        "output_record_ids": [f"object:{candidate.candidate_id}", f"seed:{seed['seed_id']}"],
+        "rationale": receipt,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
     # atomic: write all three, or none (validate everything first, then write)

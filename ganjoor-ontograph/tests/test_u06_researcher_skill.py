@@ -16,6 +16,7 @@ from pathlib import Path
 
 from ontograph.cli import main
 from ontograph.inquiry import read_catalogs
+from ontograph.records import read_events
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -173,27 +174,26 @@ def test_fresh_session_scripted_fixture_replay_matches_governed_skill_route(
     supported = [c for c in catalog.candidates if c.support_status == "supported"]
     assert supported and supported[0].evidence
 
-    # W09B's implemented governed release path accepts an equivalent human
-    # confirmation receipt for active object promotion. The skill still
-    # documents `inquire --review` for the reviewed-candidate route.
-    confirmation = tmp_path / "confirmation.json"
-    confirmation.write_text(json.dumps({
-        "human_actor": "mz",
-        "receipt": "u06-human-review",
-        "object_id": "mirror",
+    review = tmp_path / "review.json"
+    review.write_text(json.dumps([{
+        "candidate_id": supported[0].candidate_id,
+        "decision": "accept",
         "rationale": "human review accepts this as the provisional mirror route",
-    }), encoding="utf-8")
+    }]), encoding="utf-8")
 
+    # Sole active ResearchSituation is inherited: no --situation here.
     code, out, err = _run(capsys, [
-        "object", "add", study_id,
-        "--address", "mirror",
-        "--label", "Mirror",
-        "--anchor", "\u0622\u06cc\u0646\u0647",
-        "--confirmation-file", str(confirmation),
+        "inquire", study_id,
+        "--review", str(review),
+        "--review-actor", "mz",
+        "--receipt", "u06-human-review",
         *base,
     ])
     assert code == 0, err or out
-    object_id = "mirror"
+    reviewed = json.loads(out)
+    object_id = reviewed["promoted"][0]
+    assert reviewed["situation_id"] == intake["situation_id"]
+    assert reviewed["next_walk_command"]
 
     # The agent prepares the stable scripted walk; the researcher supplies
     # occurrence decisions. This one-anchor fixture route has 6 hits.
@@ -258,3 +258,67 @@ def test_fresh_session_scripted_fixture_replay_matches_governed_skill_route(
     release = json.loads(out)
     assert release["tag"] == "v0.6.0"
     assert (study / "releases" / "v0.6.0" / "records" / "inquiry-catalogs.jsonl").is_file()
+
+
+def test_legacy_kind_promotion_events_read_as_event_records(tmp_path: Path) -> None:
+    ws = tmp_path / "legacy-kind"
+    events = ws / "events" / "events.jsonl"
+    events.parent.mkdir(parents=True)
+    events.write_text(json.dumps({
+        "kind": "inquiry-candidate_promoted",
+        "candidate_id": "cand-legacy",
+        "catalog_id": "ic-legacy",
+        "actor": "mz",
+        "receipt": "legacy-receipt",
+        "created_at": "2026-09-06T00:00:00+00:00",
+    }) + "\n", encoding="utf-8")
+
+    loaded = read_events(ws)
+    assert loaded[0].event_type == "inquiry-candidate_promoted"
+    assert loaded[0].target_type == "candidate"
+    assert loaded[0].target_ids == ["cand-legacy"]
+    assert loaded[0].input_record_ids == ["catalog:ic-legacy"]
+
+
+def test_inquire_review_multiple_situations_refuses_before_write(tmp_path: Path, capsys) -> None:
+    ws_dir = tmp_path / "ontograph-workspaces"
+    study_id = "u06-multi"
+    base = ["--workspaces-dir", str(ws_dir), "--json"]
+
+    code, out, err = _run(capsys, [
+        "study", "new", study_id,
+        "--corpus-root", str(FIXTURE_ROOT),
+        "--workspaces-dir", str(ws_dir),
+    ])
+    assert code == 0, err or out
+    for hunch in ("mirror one", "mirror two"):
+        code, out, err = _run(capsys, [
+            "inquire", study_id,
+            "--hunch", hunch,
+            "--actor", "mz",
+            "--persian-form", "\u0622\u06cc\u0646\u0647",
+            *base,
+        ])
+        assert code == 0, err or out
+
+    catalogs = read_catalogs(ws_dir / study_id)
+    review = tmp_path / "review.json"
+    review.write_text(json.dumps([{
+        "candidate_id": catalogs[0].candidates[0].candidate_id,
+        "decision": "accept",
+        "rationale": "human review",
+    }]), encoding="utf-8")
+
+    before = ws_dir / study_id / "research" / "inquiry-reviews.jsonl"
+    before_bytes = before.read_bytes() if before.exists() else b""
+    code, out, err = _run(capsys, [
+        "inquire", study_id,
+        "--review", str(review),
+        "--review-actor", "mz",
+        "--receipt", "u06-multi-review",
+        *base,
+    ])
+    assert code != 0 and out == ""
+    assert "situation" in err.lower()
+    after_bytes = before.read_bytes() if before.exists() else b""
+    assert after_bytes == before_bytes

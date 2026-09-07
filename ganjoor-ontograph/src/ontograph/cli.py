@@ -852,9 +852,9 @@ def _inquire_review_cli(ws, config, args) -> dict:
         decisions = yaml.safe_load(rpath.read_text(encoding="utf-8"))
     if not isinstance(decisions, list):
         raise CLIError("decisions file must be a list of {candidate_id, decision, rationale}")
-    situation = getattr(args, "situation", None)
-    if not situation:
-        raise CLIError("--situation is required for --review")
+    situation = _preflight_situation(ws, args)
+    if situation is None:
+        raise CLIError("inquiry review requires an active ResearchSituation")
     actor = getattr(args, "review_actor", None)
     if not actor:
         raise CLIError("--review-actor is required for --review (must be the human reviewer)")
@@ -864,6 +864,7 @@ def _inquire_review_cli(ws, config, args) -> dict:
 
     result = apply_review_decisions(ws, _catalog_for(ws, situation), situation,
                                     actor, receipt, decisions)
+    result["situation_id"] = situation
     result["next_walk_command"] = (
         f"ontograph walk <study> --object {result['promoted'][0]}"
         if result["promoted"] else None

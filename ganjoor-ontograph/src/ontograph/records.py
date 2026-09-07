@@ -201,11 +201,48 @@ def append_event(workspace: str | Path, record: EventRecord) -> None:
     _append_jsonl(_events_path(workspace), record)
 
 
+def _event_from_row(row: dict, workspace: str | Path, ordinal: int) -> EventRecord:
+    """Build an EventRecord from canonical rows, while tolerating the
+    short-lived U06/W05 promotion shape that used `kind` instead of
+    `event_type`. Normalization is in-memory only; append-only history is
+    not rewritten."""
+    if "event_type" not in row and "kind" in row:
+        kind = row.get("kind", "")
+        candidate_id = row.get("candidate_id")
+        catalog_id = row.get("catalog_id")
+        return EventRecord(
+            id=row.get("id", f"ev-legacy-{ordinal:06d}"),
+            study_id=row.get("study_id", Path(workspace).name),
+            event_type=kind,
+            actor_type=row.get("actor_type", "human"),
+            actor_id=row.get("actor_id", row.get("actor", "")),
+            target_type="candidate" if candidate_id else row.get("target_type", ""),
+            target_ids=[candidate_id] if candidate_id else row.get("target_ids", []),
+            input_record_ids=[f"catalog:{catalog_id}"] if catalog_id else row.get("input_record_ids", []),
+            output_record_ids=row.get("output_record_ids", []),
+            parent_event_ids=row.get("parent_event_ids", []),
+            branch_id=row.get("branch_id", ""),
+            operation_spec_id=row.get("operation_spec_id", ""),
+            rationale=row.get("rationale", row.get("receipt", "")),
+            created_at=row.get("created_at", ""),
+        )
+    return EventRecord(**row)
+
+
 def read_events(workspace: str | Path) -> list[EventRecord]:
     """Returns the event sequence in append order -- replaying a study's
     research-state transitions is reading this list in order, per spec
     §51; no separate derived-state machine exists in v0.1."""
-    return _read_jsonl(_events_path(workspace), EventRecord)
+    path = _events_path(workspace)
+    if not path.exists():
+        return []
+    records: list[EventRecord] = []
+    with path.open(encoding="utf-8") as f:
+        for ordinal, line in enumerate(f, start=1):
+            line = line.strip()
+            if line:
+                records.append(_event_from_row(json.loads(line), workspace, ordinal))
+    return records
 
 
 def mutate_event(*_args, **_kwargs) -> None:

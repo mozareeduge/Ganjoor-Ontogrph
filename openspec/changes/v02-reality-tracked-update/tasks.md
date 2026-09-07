@@ -4,11 +4,11 @@
 
 ## Canonical execution order
 
-Current verified progress as of 2026-09-06:
+Current verified progress as of 2026-09-07:
 
-- Last completed row: W09B (`3d0e01131 Ontograph W09B: render inquiry history`).
-- First remaining row: U06.
-- Local verification after this audit: `.venv/Scripts/python.exe -m pytest -q` from `ganjoor-ontograph/` reports 324 passed, 10 skipped, 1 xfailed; `git diff --check` passes.
+- Last completed row: U06 (`4ea03b12e Ontograph U06: document governed researcher flow`, plus a follow-up U06 fix commit).
+- First remaining row: U07.
+- Latest local verification: focused U06/W05/W06/W08 regression set reports 28 passed; `.venv/Scripts/python.exe -m pytest -q` from `ganjoor-ontograph/` reports 328 passed, 10 skipped, 1 xfailed; `git diff --check` passes.
 - The historical `ganjoor-ontograph/implementation/IMPLEMENTATION_LEDGER.md` is not updated for the OpenSpec W/U continuation. Use git commits plus this task file for post-amendment progress.
 - Do not run implementation and independent QA in the same context. Implementation follows one row per turn; QA should be read-only and start from this file, `V0_2_HERMES_EXECUTION_SPEC.md`, and the latest handoff.
 
@@ -126,7 +126,7 @@ Overrides:
 
 Resume implementation here. Each U row is one implementation turn and one commit.
 
-- [x] **U06 — researcher skill:** update the skill, references, templates, and settings for the governed inquire-first route. Verify with a fresh-session scripted fixture replay; the agent prepares files/runs commands and the researcher supplies semantic review and occurrence decisions. Verified: `tests/test_u06_researcher_skill.py -q` -> 2 passed; full suite -> 326 passed, 10 skipped, 1 xfailed.
+- [x] **U06 — researcher skill:** update the skill, references, templates, and settings for the governed inquire-first route. Verify with a fresh-session scripted fixture replay; the agent prepares files/runs commands and the researcher supplies semantic review and occurrence decisions. Verified: `tests/test_u06_researcher_skill.py -q` -> 4 passed; full suite -> 328 passed, 10 skipped, 1 xfailed.
 - [ ] **U07 — documentation:** rewrite README/runbook, migration guide, and changelog so the quickstart is verbatim `study new → inquire → field/refresh → review → walk → assessed-full operation → source return → Finding → release`.
 - [ ] **U08 — packaging:** complete package metadata and dev dependency group; build wheel and sdist, then run a clean-wheel smoke test.
 - [ ] **U09 — CI:** add Windows/Ubuntu × Python 3.10/3.12 coverage and close Gate F from actual CI-equivalent commands.
