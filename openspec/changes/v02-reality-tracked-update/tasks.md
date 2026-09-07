@@ -6,9 +6,9 @@
 
 Current verified progress as of 2026-09-07:
 
-- Last completed row: U07 (documentation quickstart, migration guide, changelog, and discriminating test).
-- First remaining row: U08.
-- Latest local verification: focused U06/W05/W06/W08 regression set reports 28 passed; `.venv/Scripts/python.exe -m pytest -q` from `ganjoor-ontograph/` reports 328 passed, 10 skipped, 1 xfailed; `git diff --check` passes.
+- Last completed row: U09 (cross-platform CI matrix and static configuration contract).
+- First remaining row: U10.
+- Latest local verification: U09 static configuration test and YAML mapping validation pass; full suite from ganjoor-ontograph reports 331 passed, 10 skipped, 1 xfailed; git diff --check passes.
 - The historical `ganjoor-ontograph/implementation/IMPLEMENTATION_LEDGER.md` is not updated for the OpenSpec W/U continuation. Use git commits plus this task file for post-amendment progress.
 - Do not run implementation and independent QA in the same context. Implementation follows one row per turn; QA should be read-only and start from this file, `V0_2_HERMES_EXECUTION_SPEC.md`, and the latest handoff.
 
