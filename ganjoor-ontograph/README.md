@@ -1,47 +1,44 @@
-# Ganjoor Ontograph
+﻿# Ganjoor Ontograph
 
-A research-apparatus specification for OOO-informed close/distant reading over
-the [Ganjoor](https://ganjoor.net/) Persian poetry corpus, plus a starting
-Claude Code skill scaffold for implementing it.
+Ganjoor Ontograph is a governed research apparatus for close and distant reading over the Ganjoor Persian poetry corpus. The researcher remains the source of semantic and occurrence decisions; the CLI records, validates, and renders those decisions.
 
-- `Ganjoor_Ontograph_Research_Apparatus_Project_Spec_v2.3.0.md` — the project
-  specification (drop-in revision of v2.2.0; see `EVALUATION.md` for the diff
-  and why each change was made).
-- `EVALUATION.md` — the review that produced v2.3.0: a verified factual
-  correction, real gaps closed, and the new Claude Code runtime binding
-  (Part XIII of the spec).
-- `USER_JOURNEY.md` — the concrete experience flow: how a research session
-  actually starts, branches, and ends, with real example outputs at every
-  step. This is the UX target the build plan below is built against.
-- `fixtures/mini-ganjoor/` — a small, schema-accurate, hand-verified
-  synthetic corpus with known ground truth, used by every automated test
-  so the build never depends on cloning the real multi-GB corpora.
-- `implementation/` — the actual build package: `BUILD_PLAN.md` (phases,
-  rationale, engineering defaults), `IMPLEMENTATION_LEDGER.md` (the exact
-  task-by-task backlog), and `HOW_TO_RUN.md` (how to kick off the build
-  loop from a fresh Claude Code session).
-- `../.claude/skills/persian-poetry-ontograph/` — the researcher-facing
-  skill scaffold named in the spec's Part XIII (uses the finished engine).
-- `../.claude/skills/ontograph-build/` — the build-loop skill (builds the
-  engine in the first place). Different audience, different job: one is
-  for using the apparatus, the other is for finishing it.
+## Governed quickstart
 
-This is the project's dedicated home: `mozareeduge/Ganjoor-Ontogrph`, a fork
-of `erfanbashar1/persian-poetry-ai-agent-plugin` (which itself vendors the
-`ganjoor/ganjoor-data` corpus at its repository root — `poets/`, `index/`,
-`manifest.json`). Everything above the fork notice in the repository's root
-`README.md` is that original upstream project, unmodified; everything under
-this `ganjoor-ontograph/` directory and `.claude/skills/` is the Ontograph
-addition. An earlier draft of this package briefly lived in a separate
-scratch repository (`mozareeduge/test-experiment-toolset`, PR #1) before this
-repository existed — this directory supersedes that copy.
+The complete route is:
 
-Related repositories referenced by the spec:
+**study new → inquire → field/refresh → review → walk → assessed-full operation → source return → Finding → release**
 
-- `ganjoor/ganjoor-data` — the pinned documentary corpus (vendored at this
-  repo's root via the fork chain above; a workspace should still record the
-  exact upstream commit it was vendored from, not just "the repo root," per
-  spec §56).
-- `erfanbashar1/persian-poetry-ai-agent-plugin` — this repository's own fork
-  parent; the existing Markdown/QMD/MCP retrieval layer this spec builds
-  alongside, not on top of (spec §25).
+The executable form is:
+
+```text
+ontograph study new <study> --corpus-root <corpus> --workspaces-dir <workspaces>
+ontograph inquire <study> --hunch "<verbatim hunch>" --actor <researcher> --file proposal.json --workspaces-dir <workspaces> --json
+ontograph field build <study> --poet <poet> --workspaces-dir <workspaces> --json
+ontograph inquire <study> --refresh <catalog-id> --actor <researcher> --workspaces-dir <workspaces> --json
+ontograph inquire <study> --review <decisions.json> --review-actor <researcher> --receipt <human-receipt> --workspaces-dir <workspaces> --json
+ontograph walk <study> --object <object-address> --script walk.json --workspaces-dir <workspaces> --json
+ontograph census <study> --object <object-address> --mode assessed-full --workspaces-dir <workspaces> --json
+ontograph source show <study> --operation <operation-id> --workspaces-dir <workspaces> --json
+ontograph record add <study> --type finding --file finding.json --workspaces-dir <workspaces> --json
+ontograph release <study> --version <version> --workspaces-dir <workspaces> --json
+```
+
+`field build` establishes the field. If the field or corpus snapshot changes after inquiry evidence is verified, use `inquire --refresh <catalog-id>` before review or promotion. “Field/refresh” is one governed stage, not a command literally named `field/refresh`.
+
+The agent prepares the attributed proposal, review-file template, stable walk script, and Finding-file template, and runs the CLI. The researcher supplies the verbatim hunch, approves or rejects semantic candidate proposals, supplies the human review receipt, and decides each hit as occurrence, rejection, or ambiguity. Agent proposals are never evidence or automatic promotion.
+
+With one active ResearchSituation, governed commands inherit it. With no situation they refuse and point to `inquire`. With multiple active situations, pass `--situation <id>`; the CLI never chooses the newest situation. A sole active situation is inherited, not silently duplicated.
+
+## What the records mean
+
+An Anchor Hit is lexical incidence, not an object occurrence. A candidate catalog is inquiry evidence, not a Finding or relation. Review promotes a supported candidate to an Object Address/Lexical Anchor but creates no occurrence assessment. `walk` is the default per-hit assessment route; `done` stops interaction but does not make incomplete coverage complete. `assessed-full` requires every eligible stable hit to have an active assessment, keeps ambiguity in the denominator, and is not equivalent to `anchor`, `assessed-rule`, or `estimated`.
+
+A source return through `source show` (or `source export`) resolves the stored source manifest to exact poem context. A Finding is a validated record that cites governed operations and source support; a report or release file is not itself a Finding. Raw co-incidence, high support, or an agent interpretation does not become a Relation-Object without its governed route and human permission. Legacy-unframed operations remain readable but cannot support a Finding or verified scholarly release.
+
+## Further reading
+
+- [`implementation/HOW_TO_RUN.md`](implementation/HOW_TO_RUN.md) — researcher runbook and decision boundaries.
+- [`MIGRATION.md`](MIGRATION.md) — moving from the pre-inquiry flow.
+- [`CHANGELOG.md`](CHANGELOG.md) — release history.
+- [`../.claude/skills/persian-poetry-ontograph/SKILL.md`](../.claude/skills/persian-poetry-ontograph/SKILL.md) — agent-facing execution detail.
+- `Ganjoor_Ontograph_Research_Apparatus_Project_Spec_v2.3.0.md` — methodological specification.
