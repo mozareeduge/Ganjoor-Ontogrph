@@ -7,8 +7,7 @@ name = "ontograph"
 version = "0.1.1"
 description = "Governed research apparatus for close and distant reading over the Ganjoor Persian poetry corpus"
 readme = "README.md"
-license = "MIT"
-license-files = ["LICENSE"]
+license = {text = "MIT"}
 requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -32,6 +31,7 @@ dev = [
     "build>=1,<2",
     "pytest>=8,<10",
     "ruff>=0.8,<1",
+    "tomli>=2,<3; python_version < \"3.11\"",
 ]
 
 [project.scripts]

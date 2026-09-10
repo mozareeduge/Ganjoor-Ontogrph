@@ -12,9 +12,13 @@ from pathlib import Path
 import subprocess
 import sys
 import tarfile
-import tomllib
 import venv
 import zipfile
+
+try:
+    import tomllib  # Python 3.11+
+except ModuleNotFoundError:  # Python 3.10 -- see the "tomli" dev dependency
+    import tomli as tomllib
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -28,7 +32,7 @@ def test_distribution_metadata_and_clean_wheel_smoke(tmp_path: Path) -> None:
     """The published artifact has complete metadata and works standalone."""
     project = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
     assert project["readme"] == "README.md"
-    assert project["license"] == "MIT"
+    assert project["license"] == {"text": "MIT"}
     assert set(project["urls"]) >= {"Homepage", "Repository"}
     assert {"Programming Language :: Python :: 3"} <= set(
         project["classifiers"]
