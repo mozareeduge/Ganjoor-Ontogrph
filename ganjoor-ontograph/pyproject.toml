@@ -32,6 +32,10 @@ dev = [
     "pytest>=8,<10",
     "ruff>=0.8,<1",
     "tomli>=2,<3; python_version < \"3.11\"",
+    # Kept from the CI fix: with `--no-isolation` builds gone, this is now
+    # belt-and-suspenders -- nothing in dev depends on setuptools, and a
+    # self-sufficient dev environment should not rely on ambient state.
+    "setuptools>=68",
 ]
 
 [project.scripts]
