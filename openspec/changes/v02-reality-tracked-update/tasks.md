@@ -4,11 +4,11 @@
 
 ## Canonical execution order
 
-Current verified progress as of 2026-09-07:
+Current verified progress as of 2026-09-10:
 
-- Last completed row: U09 (cross-platform CI matrix and static configuration contract).
-- First remaining row: U10.
-- Latest local verification: U09 static configuration test and YAML mapping validation pass; full suite from ganjoor-ontograph reports 331 passed, 10 skipped, 1 xfailed; git diff --check passes.
+- Last completed row: U10 (implemented `52ad6ca1e`, warm-path fix + measurement `f7cd829da`: full-corpus warm open 0.56s â‰¤ 2s; full suite 336 passed, 10 skipped, 1 xfailed).
+- First remaining row: U11 (Gate G candidate — Rostam ready-made flow; human gate, Mohammad-only).
+- Latest local verification: U10 fix tests failed first then passed; full suite from ganjoor-ontograph reports 336 passed, 10 skipped, 1 xfailed; git diff --check passes.
 - The historical `ganjoor-ontograph/implementation/IMPLEMENTATION_LEDGER.md` is not updated for the OpenSpec W/U continuation. Use git commits plus this task file for post-amendment progress.
 - Do not run implementation and independent QA in the same context. Implementation follows one row per turn; QA should be read-only and start from this file, `V0_2_HERMES_EXECUTION_SPEC.md`, and the latest handoff.
 
@@ -130,7 +130,7 @@ Resume implementation here. Each U row is one implementation turn and one commit
 - [x] **U07 — documentation:** rewrite README/runbook, migration guide, and changelog so the quickstart is verbatim `study new → inquire → field/refresh → review → walk → assessed-full operation → source return → Finding → release`. Verified: focused U07 test -> 1 passed; full suite -> 329 passed, 10 skipped, 1 xfailed; `git diff --check` passes.
 - [x] **U08 â€” packaging:** complete package metadata and dev dependency group; build wheel and sdist, then run a clean-wheel smoke test.
 - [x] **U09 - CI:** add Windows/Ubuntu x Python 3.10/3.12 coverage. Verified: static configuration test failed first then passed; YAML mapping check; wheel smoke/reconstruction/U09 focused run -> 3 passed; full suite -> 331 passed, 10 skipped, 1 xfailed; remote matrix awaits GitHub execution.
-- [ ] **U10 â€” pinned fast path:** implement the clean-git corpus cache key from commit SHA + manifest hash + cache schema; use a full signal or explicit refusal for dirty/non-git corpora. Verify the unchanged warm command target of â‰¤2s, or record a user-approved measured exception.
+- [x] **U10 â€” pinned fast path:** implemented (commit `52ad6ca1e`) and verified with a follow-up fix (`f7cd829da`): the warm clean-git path initially globbed all ~135k corpus files per open (3.29s warm on the full corpus, over target); input-tracking is now answered by git alone. Measured full-corpus warm open **0.56s â‰¤ 2s** (clean-git identity, commit `f7cd829da`); cold rebuild 144s paid once. Full suite: 336 passed, 10 skipped, 1 xfailed.
 - [ ] **U11 â€” Gate G candidate:** execute the ready-made flow on a copy/continuation-safe Rostam workspace. Handoff must include the verbatim hunch, candidate and unsupported lists, human review receipt, governed objects with real support, at least one fully driven walk, ambiguity/incompleteness, source tray, Finding eligibility, self-contained report, timings, and comparison with the original 15-label draft. Only Mohammad may pass Gate G.
 - [ ] **U12 â€” v0.1.2 release:** execute only after explicit Gate G approval; re-run Gates Aâ€“G and verify version/tag consistency.
 
