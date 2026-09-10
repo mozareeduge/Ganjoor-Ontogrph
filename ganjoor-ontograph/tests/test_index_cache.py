@@ -247,3 +247,41 @@ def test_clean_git_identity_rejects_ignored_untracked_index_input(tmp_path, corp
     from ontograph.index_cache import cache_identity
 
     assert cache_identity(corpus_copy)["kind"] == "full-signal"
+
+
+def test_untracked_non_json_file_under_poets_forces_full_signal(tmp_path, corpus_copy):
+    """Any untracked file under poets/ — even a non-JSON one — must force
+    the conservative full-signal identity: git's clean-status guarantee is
+    only trusted when the indexed input tree carries nothing untracked."""
+    _git(corpus_copy, "init")
+    _git(corpus_copy, "add", ".")
+    _git(corpus_copy, "-c", "user.name=U10", "-c", "user.email=u10@example.invalid", "commit", "-m", "fixture")
+    (corpus_copy / "poets" / "sample1" / "notes.md").write_text("scratch", encoding="utf-8")
+
+    from ontograph.index_cache import cache_identity
+
+    assert cache_identity(corpus_copy)["kind"] == "full-signal"
+
+
+def test_warm_clean_git_open_does_not_walk_corpus_tree(tmp_path, corpus_copy, monkeypatch):
+    """The warm clean-git fast path must answer input-tracking via git, not
+    by globbing the corpus: a 100k+-file walk is the cost the fast path
+    exists to avoid, and on the full corpus it alone blew the ≤2s target."""
+    repo = tmp_path / "git-corpus"
+    shutil.copytree(corpus_copy, repo)
+    _git(repo, "init")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=U10", "-c", "user.email=u10@example.invalid", "commit", "-m", "fixture")
+    cache_dir = _copy_cache_dir(tmp_path)
+
+    conn, _, cold_hit = get_or_build_index(repo, cache_dir=cache_dir)
+    conn.close()
+    assert cold_hit is False
+
+    def _no_glob(self, *args, **kwargs):
+        raise AssertionError("warm open walked the corpus tree (Path.glob)")
+
+    monkeypatch.setattr("pathlib.Path.glob", _no_glob)
+    conn, _, warm_hit = get_or_build_index(repo, cache_dir=cache_dir)
+    conn.close()
+    assert warm_hit is True

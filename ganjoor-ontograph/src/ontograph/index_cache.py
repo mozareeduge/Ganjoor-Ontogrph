@@ -73,16 +73,22 @@ def _git_output(root: Path, *args: str) -> str | None:
 
 
 def _indexed_inputs_are_tracked(root: Path) -> bool:
-    """Return whether every JSON input the index reads is git-tracked."""
-    tracked = _git_output(root, "ls-files", "-z", "--", "poets")
-    if tracked is None:
+    """Return whether every JSON input the index reads is git-tracked.
+
+    Answered entirely by git (no corpus walk): every file under poets/ must
+    be tracked, i.e. git must report neither ignored nor other (untracked)
+    files beneath it. An untracked non-JSON file also forces the conservative
+    signal — clean status alone must not launder an input tree git doesn't
+    fully account for.
+    """
+    ignored = _git_output(root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", "poets")
+    if ignored is None or ignored != "":
         return False
-    tracked_paths = set(filter(None, tracked.split("\0")))
-    indexed_paths = {
-        path.relative_to(root).as_posix()
-        for path in root.glob("poets/**/*.json")
-    }
-    return indexed_paths <= tracked_paths
+    others = _git_output(root, "ls-files", "-z", "--others", "--exclude-standard", "--", "poets")
+    if others is None or others != "":
+        return False
+    tracked = _git_output(root, "ls-files", "-z", "--", "poets")
+    return tracked is not None and bool(tracked)
 
 def cache_identity(root: str | Path) -> dict:
     """Return the safe cache identity for a corpus root.
