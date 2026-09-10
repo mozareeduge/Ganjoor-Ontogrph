@@ -43,7 +43,7 @@ jobs:
           python -m ruff format --check tests/test_u09_ci.py
 
       - name: Build wheel and source distribution
-        run: python -m build --no-isolation
+        run: python -m build
 
       - name: Smoke-test the clean wheel
         run: python -m pytest tests/test_u08_packaging.py -q
