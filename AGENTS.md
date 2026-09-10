@@ -1,12 +1,17 @@
 # AGENTS.md — Playbook for AI agents working with this repository
 
+> **This repo also hosts Ganjoor Ontograph**, a separate research-apparatus
+> project living in `ganjoor-ontograph/` — see `CLAUDE.md` at the repo root
+> first to tell which of the two projects a task belongs to. Everything
+> below is about the retrieval/MCP project only.
+
 This repository turns the Ganjoor Persian poetry corpus (ganjoor.net) into an
 **agent-ready, QMD-searchable markdown database**. It is a fork of
 [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data) with an added
 conversion + enrichment + search layer.
 
-Everything an agent needs to know lives in this file. Read it before doing
-anything.
+Everything an agent needs to know about **this** (the retrieval/MCP) project
+lives in this file. Read it before doing anything with the retrieval layer.
 
 ---
 

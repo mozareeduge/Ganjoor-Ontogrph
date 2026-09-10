@@ -1,0 +1,44 @@
+{
+  "Id": 9105,
+  "CatId": 1,
+  "Title": "غزل آزمایشی ۱-۵",
+  "FullTitle": "غزل آزمایشی ۱-۵",
+  "FullUrl": "/fixture/9105",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Figurative/ambiguous case: 'mirror of the heart', not a literal object — intended calibration test for the ambiguous Occurrence Assessment. Also contributes one incidental HEART hit (see the HEART ground truth note).",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آینه دل من شکسته از غم / نه از شیشه، که از اندوه",
+      "HtmlText": "<div class='b'>آینه دل من شکسته از غم / نه از شیشه، که از اندوه</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آینه دل من شکسته از غم",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "نه از شیشه، که از اندوه",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}

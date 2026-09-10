@@ -1,0 +1,58 @@
+{
+  "Id": 9101,
+  "CatId": 1,
+  "Title": "غزل آزمایشی ۱-۱",
+  "FullTitle": "غزل آزمایشی ۱-۱",
+  "FullUrl": "/fixture/9101",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Tight case: mirror and rust share the first couplet.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آینه در دست من است امشب / زنگار بر آن نشسته پنهان\nباد سحری وزید آرام / بر رخ ما و بر رخ ایوان",
+      "HtmlText": "<div class='b'>آینه در دست من است امشب / زنگار بر آن نشسته پنهان\nباد سحری وزید آرام / بر رخ ما و بر رخ ایوان</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 2
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آینه در دست من است امشب",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "زنگار بر آن نشسته پنهان",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 3,
+      "Position": "Right",
+      "Text": "باد سحری وزید آرام",
+      "CoupletIndex": 1,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 4,
+      "Position": "Left",
+      "Text": "بر رخ ما و بر رخ ایوان",
+      "CoupletIndex": 1,
+      "SectionIndex1": 0
+    }
+  ]
+}

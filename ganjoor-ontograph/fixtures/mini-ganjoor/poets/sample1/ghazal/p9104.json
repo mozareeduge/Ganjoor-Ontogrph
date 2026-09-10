@@ -1,0 +1,44 @@
+{
+  "Id": 9104,
+  "CatId": 1,
+  "Title": "غزل آزمایشی ۱-۴",
+  "FullTitle": "غزل آزمایشی ۱-۴",
+  "FullUrl": "/fixture/9104",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Spelling-variant anchor test (آیینه instead of آینه); no rust present.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آیینه کهنه در صندوق خانه / خاک بر او نشسته آرام",
+      "HtmlText": "<div class='b'>آیینه کهنه در صندوق خانه / خاک بر او نشسته آرام</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آیینه کهنه در صندوق خانه",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "خاک بر او نشسته آرام",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}

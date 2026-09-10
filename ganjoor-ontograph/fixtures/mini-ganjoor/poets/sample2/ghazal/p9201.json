@@ -1,0 +1,44 @@
+{
+  "Id": 9201,
+  "CatId": 2,
+  "Title": "غزل آزمایشی ۲-۱",
+  "FullTitle": "غزل آزمایشی ۲-۱",
+  "FullUrl": "/fixture/9201",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Tight case from the minority poet: mirror and rust in the same couplet.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "آینه و زنگار در یک نفس / با هم به دست باد سپردیم",
+      "HtmlText": "<div class='b'>آینه و زنگار در یک نفس / با هم به دست باد سپردیم</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "آینه و زنگار در یک نفس",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "با هم به دست باد سپردیم",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}
