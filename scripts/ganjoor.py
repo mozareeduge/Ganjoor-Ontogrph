@@ -118,13 +118,27 @@ def run_qmd(qmd_path: str, args: list, **kwargs):
     repo root — never the caller's cwd."""
     kwargs.setdefault("cwd", REPO_ROOT)
     kwargs.setdefault("env", qmd_env())
+    # qmd emits UTF-8. Without an explicit encoding, text mode decodes captured
+    # output with the locale codec — cp1252 on Windows — which mangles or
+    # crashes on Persian. Only applies to piped streams, so it is harmless for
+    # the inherited-stdio cases (mcp stdio, demo).
+    if kwargs.get("capture_output") or kwargs.get("text"):
+        kwargs.setdefault("encoding", "utf-8")
+        kwargs.setdefault("errors", "replace")
     return subprocess.run([qmd_path, *args], **kwargs)
 
 
 def _tool_version(cmd: list, env: dict | None = None, timeout: float = 8.0) -> str | None:
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout, env=env, cwd=REPO_ROOT
+            cmd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            env=env,
+            cwd=REPO_ROOT,
         )
         text = (result.stdout or result.stderr or "").strip()
         return text.splitlines()[0] if text else None

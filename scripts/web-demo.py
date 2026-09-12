@@ -19,6 +19,7 @@ import html
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -137,11 +138,34 @@ class QmdError(Exception):
         self.detail = detail
 
 
+def find_qmd():
+    """Resolve the qmd executable. On Windows an npm-global install is a
+    qmd.cmd shim, so a bare "qmd" is not directly executable by subprocess."""
+    for name in ("qmd", "qmd.cmd", "qmd.exe"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
 def run_qmd(args):
     """Run qmd and return stdout. Raises QmdError on any failure — never swallows it."""
+    qmd_path = find_qmd()
+    if qmd_path is None:
+        raise QmdError("not_found", "qmd was not found on PATH")
     try:
+        # encoding is explicit: qmd emits UTF-8, but text=True would otherwise
+        # decode with the locale codec (cp1252 on Windows) and mangle or crash
+        # on Persian output.
         out = subprocess.run(
-            ["qmd", *args], capture_output=True, text=True, env=ENV, cwd=ROOT, timeout=120
+            [qmd_path, *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=ENV,
+            cwd=ROOT,
+            timeout=120,
         )
     except FileNotFoundError as exc:
         raise QmdError("not_found", str(exc)) from exc

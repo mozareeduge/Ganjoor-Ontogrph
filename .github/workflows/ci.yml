@@ -61,6 +61,18 @@ jobs:
           import sys
           import pathlib
 
+          # This harness prints Persian text (the query it runs). On Windows the
+          # default stdout codec is cp1252 and that print raises
+          # UnicodeEncodeError. Fix the harness's own stream only — deliberately
+          # NOT via PYTHONUTF8/PYTHONIOENCODING, because those would also apply
+          # to the child processes under test and would mask the very
+          # encoding bugs this Windows job exists to catch.
+          for _s in (sys.stdout, sys.stderr):
+              try:
+                  _s.reconfigure(encoding="utf-8", errors="replace")
+              except Exception:
+                  pass
+
           def run(cmd):
               print("+", " ".join(cmd))
               r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
