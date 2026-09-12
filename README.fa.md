@@ -1,14 +1,84 @@
-# persian-poetry-ai-agent-plugin
+# Ganjoor-Ontograph
 
 [**English**](README.md) | **فارسی**
 
-**شعر فارسی، آماده برای agent های هوش مصنوعی** — کلِ گنجینهٔ شعر فارسیِ
-[گنجور](https://ganjoor.net/) (۲۳۴ شاعر، حدود ۱۳۲٬۵۰۰ شعر) را به یک دیتابیس
-Markdown قابل جستجو تبدیل می‌کند؛ چندزبانه، آفلاین و آماده برای agent ها.
+**شعر فارسی، آماده برای agent های هوش مصنوعی — و یک ابزار پژوهشی در حال شکل‌گیری.**
+کلِ گنجینهٔ شعر فارسیِ [گنجور](https://ganjoor.net/) — ۲۳۴ شاعر، ۱۳۲٬۵۳۸ شعر،
+۲٬۲۶۱ دسته — را به یک دیتابیس Markdown قابل جستجو تبدیل می‌کند؛ چندزبانه،
+آفلاین و در دسترس agent ها از طریق MCP.
 
-این پروژه یک fork از [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data)
-است با یک pipeline اضافه: **JSON ← Markdown ← QMD index** (جستجوی معنایی
-انگلیسی + جستجوی معنایی فارسی + جستجوی دقیق ابیات، همه روی دستگاه خودتان).
+سومین حلقهٔ یک زنجیرهٔ fork: [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data)
+← [erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin)
+← **Ganjoor-Ontograph** (همین مخزن). منبع و مجوز کامل: [NOTICE.md](NOTICE.md).
+
+> **نکته دربارهٔ آدرس مخزن:** نام پروژه **Ganjoor-Ontograph** است، اما هم‌اکنون
+> در `github.com/mozareeduge/Ganjoor-Ontogrph` میزبانی می‌شود (بدون حرف "a"ی
+> دوم — تغییر نام برنامه‌ریزی شده، ببینید `ROADMAP.md` مورد GO-010، اما هنوز
+> اتفاق نیفتاده). هر دستور clone و لینک در این فایل همان املایی را دارد که
+> امروز واقعاً کار می‌کند.
+
+## این پروژه برای چیست؟
+
+آنچه امروز وجود دارد یک pipeline تبدیل + ایندکس + بازیابی است: خروجی JSON
+گنجور به Markdown آماده برای agent تبدیل می‌شود، به‌صورت محلی قابل جستجوست
+(جستجوی دقیق همیشه؛ جستجوی معنایی وقتی مدلی در دسترس باشد) و agent های هوش
+مصنوعی از طریق MCP آن را query می‌کنند. اما هدف پروژه بزرگ‌تر از این است: یک
+ابزار پژوهشی روی آرشیو کلاسیک فارسی — کاوش موضوعی بین شاعران، تحلیل ساختاری
+روی بیش از ۱۳۲ هزار شعر، و در نهایت یک لایهٔ صریح ontology/graph روی شاعران،
+شعرها، قالب‌ها، وزن‌ها و مضامین (همان "ontograph" در نام پروژه). **این لایه
+هنوز ساخته نشده است.** برای چارچوب کامل [SPEC.md](SPEC.md) و برای وضعیت واقعیِ
+در حال انجام [ROADMAP.md](ROADMAP.md) را ببینید.
+
+## شروع سریع
+
+```bash
+# پیش‌نیاز: Python 3.10+. برای جستجوی آفلاین/دقیق همین کافی است.
+# جستجوی معنایی علاوه‌بر آن به QMD 2.5+ (نسخهٔ ۲.۸.۳ تایید شده) و دسترسی
+# شبکه به huggingface.co برای دانلود مدل embedding نیاز دارد.
+
+git clone https://github.com/mozareeduge/Ganjoor-Ontogrph.git
+cd Ganjoor-Ontogrph
+
+# ۱. ببینید محیط شما واقعاً چه چیزی را می‌تواند اجرا کند — این را اول اجرا کنید
+python3 scripts/ganjoor.py doctor
+
+# ۲. گرفتن پیکرهٔ Markdown (این مخزن هنوز GitHub Release ندارد — ROADMAP مورد
+#    GO-011 — پس آن را از JSON داخل مخزن بسازید):
+python3 scripts/ganjoor.py corpus          # همهٔ ۲۳۴ شاعر، ~۶ دقیقه روی ۴ core
+python3 scripts/ganjoor.py corpus --poets hafez,saadi,rumi   # یا فقط یک زیرمجموعه
+
+# ۳. ایندکس کردن (سریع، بدون شبکه، بدون مدل)
+python3 scripts/ganjoor.py index
+
+# ۴. جستجو
+python3 scripts/ganjoor.py search "که عشق آسان نمود اول ولی افتاد مشکل ها" -c ganjoor
+python3 scripts/ganjoor.py search "همای رحمت" --offline    # بدون qmd، بدون Node، بدون هیچ مدلی
+
+# ۵. در دسترس قرار دادن برای agent ها از طریق MCP
+python3 scripts/ganjoor.py mcp             # stdio، برای config های harness مثل .mcp.json
+```
+
+**جستجوی معنایی** (`embed`، `query`) باید یک مدل embedding را از
+`huggingface.co` دانلود کند — که در محیط‌های sandbox/آفلاین (Claude Code
+web/mobile، Codex cloud، دستگاه‌های بدون اینترنت) در دسترس نیست. این یک
+محدودیت معماری است، نه یک باگ. در چنین محیط‌هایی به‌جای آن از جستجوی دقیق
+(`search`، `search --offline`) استفاده کنید. `ganjoor-en` (معنایی انگلیسی)
+هم تا زمانی که enrichment مربوط به v0.2 منتشر شود، خالی است.
+
+`build.sh`، `mcp-server.sh` و `make setup|corpus|index|embed|all|search|mcp|demo`
+همچنان کار می‌کنند — الان wrapper نازکی روی `scripts/ganjoor.py` هستند، برای
+راحتی کسانی که با آن‌ها عادت کرده‌اند. برای فهرست کامل flag ها
+`python3 scripts/ganjoor.py --help` و `<subcommand> --help` را اجرا کنید.
+
+## استفاده از یک agent harness
+
+هر agent سازگار با MCP می‌تواند به سرور `persian-poetry` (`.mcp.json`، از نوع
+stdio) وصل شود. Claude Code آن را خودکار تشخیص می‌دهد؛ harness های دیگر
+(Codex، Hermes، کلاینت‌های عمومی MCP) به یک config نیاز دارند — برای تنظیمات
+دقیق و جدول قابلیت هر harness به **[docs/HARNESSES.md](docs/HARNESSES.md)**
+مراجعه کنید. Claude Code همچنین playbook query را از
+[`.claude/skills/persian-poetry/SKILL.md`](.claude/skills/persian-poetry/SKILL.md)
+می‌گیرد. جزئیات عملیاتی کامل برای هر agent: [AGENTS.md](AGENTS.md).
 
 ## دموی ویدیویی
 
@@ -16,63 +86,7 @@ Markdown قابل جستجو تبدیل می‌کند؛ چندزبانه، آف�
 
 [![تماشای دمو — یک گفت‌وگوی واقعی با MCP server](docs/assets/demo-poster.jpg)](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)
 
-**[▶ تماشای ویدیوی دمو](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — یک گفت‌وگوی واقعی با MCP server: یک پیام فارسی دربارهٔ دوری از یار ← جستجوی معنایی در میان حدود ۱۳۲٬۵۰۰ شعر ← [فخرالدین عراقی، غزل ۱۰۶](https://ganjoor.net/eraghi/divane/ghazale/sh106). ‏۳۰ ثانیه. تماماً فارسی، تماماً محلی.
-
-## چرا؟
-
-جستجوی معنایی در شعر کلاسیک فارسی همیشه سخت بوده. داده‌های گنجور به صورت JSON
-خام با خلاصهٔ فارسی می‌آید و جستجوی ساده هم جواب نمی‌دهد. این پروژه:
-
-1. هر شعر را به یک فایل Markdown تمیز تبدیل می‌کند — با YAML frontmatter
-   (وزن، قافیه، قالب، منبع، لینک به گنجور)، متن اعراب‌دار، بخش «متن ساده» و
-   خلاصهٔ فارسی
-2. هر شعر را با یک **خلاصهٔ معنایی انگلیسی** و کلیدواژه غنی می‌کند (هر API
-   سازگار با OpenAI — قابل تعویض). یعنی retrieval به انگلیسی کار می‌کند ولی
-   خود شعر فارسی می‌ماند
-3. یک **QMD index پروژه‌محلی** (`.qmd/index.yml`) با مدل چندزبانه
-   Qwen3-Embedding-0.6B می‌دهد — هم فارسی، هم انگلیسی، هم semantic و هم exact
-4. کاملاً ایزوله است: index این پروژه هیچ‌وقت با QMD سراسری دستگاه شما
-   قاطی نمی‌شود
-
-## شروع سریع
-
-پیکره به صورت **GitHub Release artifact** توزیع می‌شود (فقط فایل‌های Markdown —
-ایندکس برداری را خودتان روی دستگاهتان build می‌کنید).
-
-```bash
-# پیش‌نیازها: Python 3.10+ و QMD 2.5+
-npm install -g @tobilu/qmd
-
-# ۱. کلون کردن
-git clone https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin.git
-cd persian-poetry-ai-agent-plugin
-
-# ۲. گرفتن پیکره — از صفحهٔ Releases فایل ganjoor-md-v*.tar.gz را بگیرید و:
-tar -xzf ganjoor-md-v0.1.0.tar.gz -C md
-#    یا build از روی دادهٔ داخل مخزن:  python3 src/ganjoor2md.py --input . --output md
-
-# ۳. ساخت index محلی (پروژه‌محلی و ایزوله)
-export QMD_TRUST_LOCAL_CONFIG=1
-qmd update
-qmd embed -c ganjoor-fa      # برداریِ جستجوی معنایی فارسی (فقط خلاصه‌ها، طبق طراحی)
-qmd embed -c ganjoor-en      # برداریِ جستجوی معنایی انگلیسی (از v0.2 که خلاصه‌ها بیاید)
-
-# ۴. جستجو — دقیق فارسی، معنایی فارسی، معنایی انگلیسی
-qmd search "که عشق آسان نمود اول ولی افتاد مشکل ها" -c ganjoor
-qmd query "شعرهایی درباره غم و گذر عمر" -c ganjoor-fa
-qmd query "poems about the pain of separation at night" -c ganjoor-en
-
-# ۵. در دسترس قرار دادن برای agent ها از طریق MCP
-./scripts/mcp-server.sh --daemon   # http://localhost:8191/mcp
-```
-
-ترجیح می‌دهید با `make`؟ [Makefile](Makefile) همان مراحل را شفاف اجرا می‌کند:
-`make setup`، `make corpus`، `make index`، `make embed`، `make all`، `make search`،
-`make mcp`.
-
-راهنمای گام‌به‌گام کامل و playbook مخصوص agent ها در [AGENTS.md](AGENTS.md) است.
-اگر agent شما با MCP کار می‌کند، [مهارت persian-poetry-mcp](skills/persian-poetry-mcp/SKILL.md)
-را هم دارد — همانجا query ها و pattern های تست‌شده نوشته شده.
+**[▶ تماشای ویدیوی دمو](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — یک گفت‌وگوی واقعی با MCP server: یک پیام فارسی دربارهٔ دوری از یار ← جستجوی معنایی در میان ۱۳۲٬۵۳۸ شعر ← [فخرالدین عراقی، غزل ۱۰۶](https://ganjoor.net/eraghi/divane/ghazale/sh106). ‏۳۰ ثانیه. تماماً فارسی، تماماً محلی. (میزبانیِ ویدیو روی release مخزن upstream است، طبق `ROADMAP.md` مورد GO-014 — این مخزن هنوز Release ندارد.)
 
 ## معماری
 
@@ -82,28 +96,38 @@ qmd query "poems about the pain of separation at night" -c ganjoor-en
         ▼
 md/poets/<slug>/…            → collection "ganjoor"     → جستجوی دقیق فارسی (BM25، بدون بردار)
 md/summaries-fa/<slug>/…     → collection "ganjoor-fa"  → جستجوی معنایی فارسی (فقط خلاصه)
-md/summaries-en/<slug>/…     → collection "ganjoor-en"  → جستجوی معنایی انگلیسی + BM25
+md/summaries-en/<slug>/…     → collection "ganjoor-en"  → جستجوی معنایی انگلیسی (تا v0.2 خالی)
         │  .qmd/index.yml (پروژه‌محلی، همراه مخزن)
         ▼
-qmd query/search (ایزوله، Qwen3-Embedding چندزبانه)
+qmd / scripts/ganjoor.py (search، query، mcp)
 ```
 
-تقسیم سه‌collection عمدی است: embedding ها **فقط روی خلاصه‌ها** می‌روند (هر زبان
-خلاصهٔ خودش)، شعرهای کامل در یک collection واژگانی بدون بردار برای جستجوی دقیق
-ابیات می‌مانند، و هر فایل خلاصه یک pointer به نام `poem:` دارد که به شعر واقعی
-فارسی برمی‌گردد.
+embedding ها فقط روی دو collection خلاصه اجرا می‌شوند، طبق طراحی — شعرهای
+کامل در یک collection واژگانی بدون بردار برای جستجوی دقیق ابیات می‌مانند، و
+هر خلاصه یک pointer به نام `poem:` دارد که به متن واقعی فارسی برمی‌گردد.
+چرایی این طراحی: [docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## وضعیت
 
-- ✅ داده تأیید شد (۲۳۴ شاعر، ~۱۳۲٬۵۳۸ شعر، ۲٫۳ گیگابایت)
-- ✅ کل پیکره تبدیل شد (۰ خطا)؛ جستجوی معنایی و دقیق فارسی فعال است
-- ✅ **نسخهٔ v0.1.0 منتشر شد** — artifact پیکره `ganjoor-md-v0.1.0.tar.gz`
-  (کاملِ فارسی: شعرها + زندگینامه‌ها + دسته‌ها + خلاصه‌های فارسی)
-- ✅ MCP server، مهارت persian-poetry-mcp و Makefile آماده است
-- ⏳ خلاصه‌های انگلیسی در حال تولید است (رایگان، حدود ۲ هفته) → **v0.2.0** که
-  `summaries-en` هم به artifact اضافه می‌شود
-- ⏳ بنیان‌گذار گنجور خودش پیشنهاد داده پروژه را معرفی کند؛ ارائهٔ ساده برای
-  کاربران غیرفنی در راه است
+- داده تأیید شد: ۲۳۴ شاعر، **۱۳۲٬۵۳۸** شعر، ۲٬۲۶۱ دسته، ۰ خطا، ۲۶۳٬۶۰۳ فایل
+  Markdown، حدود ۱٫۴ گیگابایت، ~۶ دقیقه ساخت روی ۴ core. (یک commit قدیمی‌تر
+  عدد ۱۳۲٬۵۹۱ شعر را ادعا می‌کند — این ناهماهنگی در `CHANGELOG.md` ثبت شده؛
+  عدد تایید‌شده همان ۱۳۲٬۵۳۸ است.)
+- چندسکویی: یک entrypoint (`scripts/ganjoor.py`) روی Linux/macOS/Windows به
+  یک شکل کار می‌کند (shim های `ganjoor.cmd`/`ganjoor.ps1`)، و روی هر سه در CI
+  تست شده (`.github/workflows/ci.yml`).
+- MCP server، مهارت Claude Code، اسناد multi-harness و دموی وب همه فعال‌اند؛
+  دموی وب الان به‌جای گفتن «نتیجه‌ای نیست» خرابی موتور جستجو را صادقانه گزارش
+  می‌کند.
+- این مخزن هنوز GitHub Release ندارد (`ROADMAP.md` مورد GO-011) — فعلاً پیکره
+  را محلی بسازید.
+- خلاصه‌های معنایی انگلیسی (`ganjoor-en`) هنوز تولید نشده‌اند — v0.2
+  (`ROADMAP.md` مورد GO-020).
+- لایهٔ ontology/graph یک جهت اعلام‌شده است، نه چیزی ساخته‌شده — v0.3+
+  (`ROADMAP.md`، exploratory).
+
+فهرست کامل کارها: [ROADMAP.md](ROADMAP.md). چه چیزی چه زمانی منتشر شد:
+[CHANGELOG.md](CHANGELOG.md).
 
 ## منبع و مجوز
 
