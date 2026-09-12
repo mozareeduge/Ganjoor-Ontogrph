@@ -2,9 +2,16 @@ MIT License
 
 Copyright (c) 2026 Erfan Bashar (and contributors)
 
-This license applies to the code and tooling in this repository that is
-original to this project: `src/`, `scripts/`, `AGENTS.md`, `README.md`,
-`queries/`, and the `.qmd/index.yml` configuration.
+Ganjoor-Ontograph is a fork of erfanbashar1/persian-poetry-ai-agent-plugin.
+The conversion, enrichment, search and MCP layers originate in that project
+and remain under its copyright above; later contributions to this fork are
+made by its contributors under the same terms. See NOTICE.md for the full
+provenance chain.
+
+This license applies to the code, tooling and documentation in this
+repository that is original to the project and its fork — among others
+`src/`, `scripts/`, `docs/`, `queries/`, `.github/`, the `.qmd/index.yml`
+configuration, and the Markdown documents at the repository root.
 
 It does NOT apply to the Ganjoor data files under `poets/`, `index/`,
 `manifest.json`, `metres.json`, `languages.json`, or `API.md`, which are

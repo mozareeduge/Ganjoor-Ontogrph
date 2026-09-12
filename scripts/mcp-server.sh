@@ -12,23 +12,26 @@
 #   ./scripts/mcp-server.sh           # start in foreground
 #   ./scripts/mcp-server.sh --daemon  # start as background daemon
 #   ./scripts/mcp-server.sh stop      # stop the daemon
+#
+# Thin wrapper: delegates to `python3 scripts/ganjoor.py mcp` (the single
+# cross-platform entrypoint); this script only keeps its own env var and
+# argument interface stable for existing users/docs.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${QMD_MCP_PORT:-8191}"
-export QMD_TRUST_LOCAL_CONFIG=1   # project-local config pins custom models
 
 cd "$REPO_ROOT"
 
 case "${1:-}" in
   stop)
-    qmd mcp stop --port "$PORT"
+    python3 scripts/ganjoor.py mcp --http --port "$PORT" --stop
     ;;
   --daemon)
-    qmd mcp --http --port "$PORT" --daemon
+    python3 scripts/ganjoor.py mcp --http --port "$PORT" --daemon
     echo "QMD MCP server (ganjoor) listening on http://localhost:${PORT} (index: ${REPO_ROOT}/.qmd)"
     ;;
   *)
-    exec qmd mcp --http --port "$PORT"
+    exec python3 scripts/ganjoor.py mcp --http --port "$PORT"
     ;;
 esac

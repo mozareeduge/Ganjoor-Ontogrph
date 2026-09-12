@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(qmd search:*)",
+      "Bash(qmd status:*)",
+      "Bash(qmd get:*)",
+      "Bash(qmd ls:*)",
+      "Bash(qmd --version)",
+      "Bash(python3 scripts/ganjoor.py:*)",
+      "Bash(make)",
+      "Bash(make help)",
+      "Bash(make search)",
+      "Bash(make demo)"
+    ]
+  }
+}

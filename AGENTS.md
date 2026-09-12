@@ -1,12 +1,19 @@
 # AGENTS.md — Playbook for AI agents working with this repository
 
 This repository turns the Ganjoor Persian poetry corpus (ganjoor.net) into an
-**agent-ready, QMD-searchable markdown database**. It is a fork of
-[ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data) with an added
-conversion + enrichment + search layer.
+**agent-ready, QMD-searchable markdown database**, exposed over MCP. It is
+the third link in a fork chain — see [NOTICE.md](NOTICE.md) for full
+provenance: [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data)
+→ [erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin)
+→ **Ganjoor-Ontograph** (this repo).
 
-Everything an agent needs to know lives in this file. Read it before doing
-anything.
+Everything an agent needs for day-to-day operation lives in this file. For a
+cold start on this repo, read in this order: **[docs/HANDOFF.md](docs/HANDOFF.md)**
+(the start-here protocol) → **[SPEC.md](SPEC.md)** (what the system is and
+its invariants) → **[ROADMAP.md](ROADMAP.md)** (status) → this file
+(operational commands). If you are Claude Code specifically, `CLAUDE.md` is
+a fast-path pointer back to this file. If your task involves MCP or you're
+unsure what your environment can do, read **[docs/HARNESSES.md](docs/HARNESSES.md)**.
 
 ---
 
@@ -16,10 +23,15 @@ anything.
 |---|---|
 | `poets/`, `index/`, `manifest.json`, `metres.json`, `languages.json`, `API.md` | Upstream Ganjoor JSON data (poets, categories, poems) — do not edit |
 | `src/` | The converter + enrichment scripts (JSON → Markdown) |
-| `scripts/` | Shell wrappers: fetch → convert → enrich → ingest |
+| `scripts/ganjoor.py` | **Primary cross-platform entrypoint** — stdlib-only, identical on Linux/macOS/Windows |
+| `scripts/ganjoor.cmd`, `scripts/ganjoor.ps1` | Windows shims for `ganjoor.py` |
+| `scripts/build.sh`, `scripts/mcp-server.sh` | Thin shell wrappers around `ganjoor.py`, kept for existing muscle memory |
 | `md/` | **Generated** — the QMD-ready Markdown corpus (gitignored) |
 | `.qmd/index.yml` | **Checked-in project-local QMD config** — this repo's own isolated search index |
 | `queries/` | Example QMD queries (English + Persian) |
+| `.mcp.json`, `.claude/skills/persian-poetry/SKILL.md` | Claude Code MCP server config + query playbook |
+| `docs/HARNESSES.md` | Per-harness MCP setup (Codex, Hermes, Claude Code web/mobile) + capability matrix |
+| `SPEC.md`, `ROADMAP.md`, `CHANGELOG.md`, `docs/DECISIONS.md`, `docs/HANDOFF.md` | Governance/hand-off document set — what the system is, what's done, why, and how to pick this up cold |
 
 ## 2. The big idea
 
@@ -35,116 +47,168 @@ anything.
     **BM25 only (no vectors)** — this is the lexical layer: Persian exact-line search.
   - `ganjoor-en` → `md/summaries-en/**` — English semantic summaries, one per
     poem. Embedded. Use for English semantic search and English BM25.
+    **Empty until v0.2 enrichment ships** (`ROADMAP.md` GO-020).
   - `ganjoor-fa` → `md/summaries-fa/**` — Persian خلاصه summaries, one per poem.
     Embedded. Use for Persian semantic search on summaries.
   - Every summary file's frontmatter has a `poem:` pointer to the full Persian
     poem — the bridge from any summary hit back to the real text.
 - **The search index is project-local** (`.qmd/index.yml` + `.qmd/index.sqlite`).
   It never touches the machine's global QMD index or any other profile's index.
+- **Never embed `ganjoor`.** Rationale: `SPEC.md` §4 and `docs/DECISIONS.md` ADR-001.
 
-## 3. Installation & distribution
+## 3. Installation & operation
 
-There is no magic installer. Everything needed is in this repo, and every step
-below is explicit so you (or an agent) can verify each one. The **Markdown
-corpus** is distributed as a GitHub Release artifact — the vector index is NOT
-shipped; it is built locally per machine (`qmd embed`).
+There is no magic installer. Everything needed is in this repo. **This repo
+has no GitHub Release yet** (`ROADMAP.md` GO-011) — build the corpus locally
+rather than expecting a downloadable tarball.
 
 ### Step 0 — Prerequisites
 
-- Python 3.10+ (`python3 --version`)
-- [QMD](https://github.com/tobi/qmd) 2.5+ (`npm install -g @tobilu/qmd`, then `qmd --version`)
-- ~2 GB free disk for the data, ~4 GB for the built corpus + index
+- Python 3.10+ (`python3 --version`) — this alone gets you exact/offline search.
+- For semantic search: [QMD](https://github.com/tobi/qmd) 2.5+ on `PATH`
+  (`npm install -g @tobilu/qmd`, then `qmd --version`). QMD **2.8.3** is the
+  version currently published and verified against this repo's docs.
+- ~2 GB free disk for the data, ~4 GB for the built corpus + index.
+- Run `python3 scripts/ganjoor.py doctor` first, always — it reports exactly
+  what's available (Python, Node, qmd, corpus, index, huggingface.co
+  reachability) and what to do next. Pass `--strict` to make it exit
+  non-zero when nothing works (useful in scripts/CI).
 
 ### Step 1 — Get the code and the corpus
 
 ```bash
-git clone https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin.git
-cd persian-poetry-ai-agent-plugin
+git clone https://github.com/mozareeduge/Ganjoor-Ontogrph.git
+cd Ganjoor-Ontogrph
 ```
 
-Two ways to get `md/` (the Markdown corpus):
+Build `md/` (the Markdown corpus) with the primary entrypoint:
 
-- **From a Release (recommended — no conversion needed):**
-  ```bash
-  # download ganjoor-md-v*.tar.gz from the Releases page, then:
-  tar -xzf ganjoor-md-v0.1.0.tar.gz -C md
-  ```
-- **Or build it yourself from the data (slower, but fully reproducible):**
-  ```bash
-  python3 src/ganjoor2md.py --input . --output md --jobs 4
-  ```
+```bash
+python3 scripts/ganjoor.py corpus                          # all 234 poets (~6 min on 4 cores)
+python3 scripts/ganjoor.py corpus --poets hafez,saadi,rumi  # a subset — cheaper for a sandbox/CI run
+python3 scripts/ganjoor.py corpus --jobs 4                  # control worker count
+python3 scripts/ganjoor.py corpus --force                   # reconvert even if md/ exists
+```
 
-> **Artifact contents:** the v0.1 artifact is **Persian-complete** — full poems,
-> poet bios, category indexes, and Persian خلاصه mirrors. The English
-> `summaries-en` collection is generated by enrichment and ships in **v0.2**;
-> until then `ganjoor-en` is empty and only `ganjoor` / `ganjoor-fa` searches
-> return results.
+If a release tarball ever exists (this repo's own, once GO-011 lands, or the
+upstream fork's today), extract it **through the same command** rather than
+raw `tar` — `md/` is gitignored and does not exist on a fresh clone, and
+`tar -C md ...` on a missing directory fails (`tar` does not create `-C`'s
+target):
+
+```bash
+python3 scripts/ganjoor.py corpus --tar ganjoor-md-v0.1.0.tar.gz
+```
+
+(Equivalent to `mkdir -p md && tar -xzf ganjoor-md-v0.1.0.tar.gz -C md` — the
+tarball's own top level is `poets/`, `summaries-fa/`, etc., packed with
+`tar -C md .`, so it unpacks straight into `md/`.)
+
+> **Artifact/corpus contents:** Persian is complete — full poems, poet bios,
+> category indexes, and Persian خلاصه mirrors. `summaries-en` (and therefore
+> the `ganjoor-en` collection) stays empty until v0.2 enrichment
+> (`src/enrich.py`) has been run; until then only `ganjoor` / `ganjoor-fa`
+> searches return results.
 
 ### Step 2 — Build the local search index
 
 The index is project-local and isolated (`.qmd/index.yml` is checked in):
 
 ```bash
-export QMD_TRUST_LOCAL_CONFIG=1   # allow the checked-in config + custom models
-qmd update                        # index the Markdown files (BM25 + metadata)
-qmd embed -c ganjoor-fa           # Persian semantic vectors (خلاصه collection)
-qmd embed -c ganjoor-en           # English semantic vectors (summary collection)
+python3 scripts/ganjoor.py index          # BM25 + metadata — fast, no network, no model
+python3 scripts/ganjoor.py embed          # vectors for ganjoor-fa AND ganjoor-en (both, by default)
+python3 scripts/ganjoor.py embed -c ganjoor-fa   # or scope to one summary collection
 ```
 
-Embedding is scoped to the summary collections **by design** — the `ganjoor`
-collection (full poems) is BM25-only and never embedded. The first `qmd embed`
-downloads the multilingual Qwen3-Embedding model (~640 MB).
+`ganjoor.py index`/`embed` set `QMD_TRUST_LOCAL_CONFIG=1` for you (the
+checked-in `.qmd/index.yml` pins a custom embedding model; QMD gates
+non-default model URIs from checked-in configs otherwise). If you call `qmd`
+directly instead, export it yourself first.
 
-`qmd update` is fast. `qmd embed` takes minutes to hours depending on your
-hardware — it runs locally and is resumable.
+**`embed` is scoped to `{ganjoor-fa, ganjoor-en}` by design — never
+`ganjoor`.** The first `embed` downloads the multilingual Qwen3-Embedding
+model (~640 MB) from `huggingface.co`. `index` is fast; `embed` takes minutes
+to hours depending on hardware, runs locally, and is resumable.
+
+> **Do not follow QMD's own post-`update` advice literally.** After `qmd
+> update`, QMD prints something like `Run 'qmd embed' to update embeddings
+> (263603 unique hashes need vectors)`, and `qmd status` reports all 263,603
+> docs as needing embedding. That count includes the 135,033-document
+> `ganjoor` collection, which this project **deliberately never embeds**
+> (SPEC.md §4). Always scope embedding with `-c ganjoor-fa` / `-c ganjoor-en`
+> (or just use `python3 scripts/ganjoor.py embed`, which already does this)
+> — do not run a bare `qmd embed` with no collection filter.
 
 ### Step 3 — Search
 
 ```bash
-qmd query "poems about the pain of separation from the beloved at night" -c ganjoor-en
-qmd search "که عشق آسان نمود اول ولی افتاد مشکل ها" -c ganjoor
-qmd query "شعرهایی درباره غم و گذر عمر" -c ganjoor-fa
+# Exact (BM25) — no model, no network, always available once indexed
+python3 scripts/ganjoor.py search "که عشق آسان نمود اول ولی افتاد مشکل ها" -c ganjoor -n 3
+
+# Pure-Python fallback — no qmd, no Node, no model, at all
+python3 scripts/ganjoor.py search "همای رحمت" --offline
+
+# Semantic (needs embeddings + a reachable huggingface.co at embed time)
+python3 scripts/ganjoor.py query "poems about the pain of separation at night" -c ganjoor-en
+python3 scripts/ganjoor.py query "شعرهایی درباره غم و گذر عمر" -c ganjoor-fa
 ```
+
+`--offline` cannot run `query` (semantic) at all — it is exact-match only,
+over the Markdown files directly, with no `qmd`/Node/model dependency.
 
 ### Step 4 — Expose it to agents via MCP
 
 ```bash
-./scripts/mcp-server.sh --daemon    # http://localhost:8191/mcp
+python3 scripts/ganjoor.py mcp                        # stdio (default — what .mcp.json uses)
+python3 scripts/ganjoor.py mcp --http --port 8191      # HTTP, for clients that need it
+python3 scripts/ganjoor.py mcp --http --port 8191 --stop  # stop the HTTP daemon
 ```
 
-Any MCP-capable agent can query the corpus. Stop it with `./scripts/mcp-server.sh stop`.
+`./scripts/mcp-server.sh --daemon` / `./scripts/mcp-server.sh stop` remain
+equivalent thin wrappers over the HTTP form. Any MCP-capable agent can query
+the corpus. For per-harness setup (Claude Code CLI/Desktop/web, Codex,
+Hermes, generic MCP clients) and a capability matrix, see
+**[docs/HARNESSES.md](docs/HARNESSES.md)**.
 
-**Protocol notes (verified 2026-08-16 against QMD 2.5.3):**
+**Protocol notes (verified against qmd 2.8.3):**
 
-- The server speaks MCP **2025-11-25 (session-based HTTP)**. After `initialize`,
-  capture the `mcp-session-id` **response header** and send it back as the
-  `Mcp-Session-Id` header on every later request, then send
-  `notifications/initialized`.
-- Tool surface: **`query`**, **`get`**, **`multi_get`**, **`status`**.
-  (There is no `search` tool — hybrid search lives in `query`.)
+- Tool surface: **`query`**, **`get`**, **`multi_get`**, **`status`**. (There
+  is no `search` tool over MCP — hybrid search lives in `query`.)
+- The HTTP transport is **stateless** — `initialize` does not return an
+  `mcp-session-id` header. Do not implement session-id capture/echo logic
+  against this version; send each request independently. The stdio
+  transport needs no session handling at all and is the default.
+- The `get` tool's document parameter is **`file`** (a `qmd://`-relative path
+  or `#docid`), **not** `docid` — passing `docid` produces an
+  input-validation error.
+- The `query` tool defaults `rerank` to `true`, which triggers a reranker
+  model download on first use. In offline/CPU-only/sandboxed environments
+  this makes **every** `query` call fail or hang, including plain `lex`
+  (BM25) searches — always pass `"rerank": false` explicitly unless you have
+  confirmed the reranker model is already cached locally.
 
 **`query` tool** — typed searches (each item is `{type: "lex"|"vec"|"hyde", query}`),
 `collections` is a plural array, plus `limit`, `minScore`, `candidateLimit`,
 `intent`, `rerank`:
 
 ```json
-// Persian exact line (lex)
+// Persian exact line (lex) — works everywhere, no model needed
 {"searches": [{"type": "lex", "query": "یوسف گم گشته بازآید به کنعان، غم مخور"}],
- "collections": ["ganjoor"], "limit": 5}
+ "collections": ["ganjoor"], "limit": 5, "rerank": false}
 
-// English semantic (vec)
+// English semantic (vec) — needs a reachable embedding model
 {"searches": [{"type": "vec", "query": "poems about the pain of separation at night"}],
- "collections": ["ganjoor-en"], "limit": 5}
+ "collections": ["ganjoor-en"], "limit": 5, "rerank": false}
 
 // Persian semantic (vec)
 {"searches": [{"type": "vec", "query": "شعرهایی درباره غم و گذر عمر"}],
- "collections": ["ganjoor-fa"], "limit": 5}
+ "collections": ["ganjoor-fa"], "limit": 5, "rerank": false}
 ```
 
-**`get` tool** — fetch a document by docid (`#e339c3`) or `qmd://` path
-(`qmd://ganjoor/hafez/ghazal/sh255.md`); content comes back as a `resource`
-item with `text/markdown`. Follow the summary's `poem:` pointer to the full
-poem and answer from it — never from snippets alone.
+**`get` tool** — fetch a document by `file` (a docid like `#e339c3` or a
+`qmd://` path like `qmd://ganjoor/hafez/ghazal/sh255.md`); content comes back
+as a `resource` item with `text/markdown`. Follow the summary's `poem:`
+pointer to the full poem and answer from it — never from snippets alone.
 
 ### English enrichment — pluggable LLM (optional, for English semantic search)
 
@@ -173,71 +237,88 @@ The pipeline is resumable and idempotent: already-enriched poems are skipped
 the corpus still builds and indexes fine — Persian search works fully; only
 English semantic retrieval is absent.
 
-Notes:
-- `QMD_TRUST_LOCAL_CONFIG=1` is required for unattended runs because the
-  checked-in `.qmd/index.yml` pins custom models (Qwen3-Embedding) — by design,
-  QMD gates non-default model URIs from checked-in configs.
-- The embedding model is multilingual (Qwen3-Embedding-0.6B): **English and
-  Persian semantic search both work**.
-- `qmd` must be on `PATH` (QMD 2.5+). On machines with multiple Node
-  installations, make sure the `qmd` binary and the `node` that launches it
-  match ABI versions; the pinned wrapper pattern used in this project's docs
-  avoids `NODE_MODULE_VERSION` errors.
+## 4. Environment capabilities — reason about this before running anything
 
-## 4. The retrieval workflow (do this, not snippet-only answers)
+Not every environment has the same capabilities. Two independent axes:
+
+| Axis | Needs | Unavailable when |
+|---|---|---|
+| Lexical (BM25) search | `qmd` on PATH + built index, or nothing at all (`ganjoor.py search --offline`) | Never — always available once the corpus/index exists |
+| Semantic (vector) search | Network access to `huggingface.co` to download the embedding/reranker model (~640 MB, once per machine) | Sandboxed/cloud harness environments (Claude Code web/mobile, Codex cloud) block this host — a **permanent architectural constraint**, not a bug |
+
+In a sandboxed cloud environment: `embed`, `query` with `vec`/`hyde` search
+types, and MCP `query` calls with default `rerank: true` will fail or hang.
+Use `search` (BM25), `search --offline`, and pass `"rerank": false` on MCP
+`query` calls. `ganjoor-en` is empty regardless of environment until v0.2
+enrichment has been run somewhere with an LLM API key — a data gap, not a
+capability gap. Full detail: `SPEC.md` §7, `docs/HARNESSES.md`. One-command
+check for the current environment: `python3 scripts/ganjoor.py doctor`.
+
+## 5. The retrieval workflow (do this, not snippet-only answers)
 
 ```
-1. qmd query "<english semantic>" -c ganjoor-en          → hit: #abc123
-2. qmd get "#abc123" --full-path                          → path to a summary file
-3. Read the summary file's frontmatter: poem: <relative path>
+1. query "<search>" -c ganjoor-en (or ganjoor-fa / ganjoor for exact)  → hit: #abc123 or a file path
+2. get that document (MCP: {"file": "#abc123"}; CLI: qmd get "#abc123" --full-path)
+3. Read the summary file's frontmatter: poem: <relative path>  (skip if the hit is already a full poem, i.e. from `ganjoor`)
 4. Read the full Persian poem at that path
 5. Answer using the Persian text + metadata (poet, metre, url), citing paths
 ```
 
 Never answer from snippets alone. Fetch the document, then answer.
 
-## 5. Query patterns that work
+## 6. Query patterns that work
 
 ```bash
-# English semantic (the primary mode)
-qmd query "poems about impermanence and the fleeting nature of joy" -c ganjoor-en -n 5
+# English semantic (needs a reachable embedding model)
+python3 scripts/ganjoor.py query "poems about impermanence and the fleeting nature of joy" -c ganjoor-en -n 5
 
-# English lexical
-qmd search "wine cupbearer tavern-elder" -c ganjoor-en -n 5
+# Persian exact line (BM25 — the killer feature for poetry, works everywhere)
+python3 scripts/ganjoor.py search "رسید مژده که ایام غم نخواهد ماند" -c ganjoor -n 3
 
-# Persian exact line (BM25 — the killer feature for poetry)
-qmd search "رسید مژده که ایام غم نخواهد ماند" -c ganjoor -n 3
+# Persian semantic (needs a reachable embedding model)
+python3 scripts/ganjoor.py query "شعرهایی درباره دلتنگی و شب" -c ganjoor-fa -n 5
 
-# Persian semantic (multilingual embedder)
-qmd query "شعرهایی درباره دلتنگی و شب" -c ganjoor -n 5
-
-# Structured query — write intent/lex/vec yourself, don't rely on expansion
-qmd query $'intent: Find ghazals about the pain of separation at night, not poems about wine parties.\nlex: separation night grief beloved parting\nvec: poems about the anguish of being apart from the beloved in the dark of night\nhyde: A Hafez ghazal describing the torment of separation and longing at night.' -c ganjoor-en
+# Pure-Python offline fallback — exact match only, no model/qmd/Node
+python3 scripts/ganjoor.py search "وجود عشق" --offline
 ```
 
-## 6. Repository rules
+For the raw `qmd query` structured-query form (writing `intent`/`lex`/`vec`/`hyde`
+yourself instead of relying on expansion) and the MCP JSON call shapes, see
+**[.claude/skills/persian-poetry/SKILL.md](.claude/skills/persian-poetry/SKILL.md)**
+— it is the maintained, tool-tested playbook and takes precedence over
+recreating those examples here.
+
+## 7. Repository rules
 
 - **Never modify `poets/`, `index/`, or other upstream JSON** — they track
   upstream ganjoor-data. Rebuild artifacts from them instead.
 - **Never commit `md/` or `.qmd/*.sqlite*`** — gitignored build artifacts.
-- The Markdown corpus is distributed as a GitHub Release artifact (see
-  `scripts/` and the release workflow) so agents download it instead of
-  converting 132K files themselves.
+- Don't build the full ~2 GB corpus or run a full `qmd update`/`embed` in a
+  disk- or time-constrained sandbox — use `corpus --poets <subset>`.
 - Keep machine-specific state (global QMD config, local indexes, API keys) out
   of this repo. Enrichment reads credentials from environment variables only.
+- Do not describe graph/ontology capabilities as present — they are the
+  stated long-term direction (`SPEC.md` §1, §6; `ROADMAP.md` v0.3+,
+  exploratory), not shipped.
 - Attribution: see `NOTICE.md`. This project is a fork; upstream has no
   license — classical Persian texts are public domain, Ganjoor's AI summaries
   and compilation are theirs.
+- Changing the repo: read [CONTRIBUTING.md](CONTRIBUTING.md) first (branching,
+  commit style, what needs a CHANGELOG/ROADMAP update).
 
-## 7. Status
+## 8. Status
 
-- [x] Data verified (234 poets / ~132.5K poems, 2.3 GB)
-- [x] QMD integration proven (three-collection architecture, multilingual embedder)
-- [x] Converter `src/ganjoor2md.py` (JSON → MD) — full corpus, 0 errors
-- [x] Enrichment `src/enrich.py` (English summaries via OpenAI-compatible API) — pluggable
-- [x] **v0.1.0 released** — corpus artifact `ganjoor-md-v0.1.0.tar.gz`
-      (Persian-complete: poems, bios, categories, خلاصه mirrors)
-- [x] MCP server (`scripts/mcp-server.sh`) + `persian-poetry-mcp` skill + Makefile
-- [ ] English semantic summaries: free crawl in progress → **v0.2.0** adds
-      `summaries-en` to the release artifact
-- [ ] Non-technical presentation (Ganjoor founder offered to promote it)
+See **[ROADMAP.md](ROADMAP.md)** for the authoritative, ID-tracked task
+ladder and **[CHANGELOG.md](CHANGELOG.md)** for what has shipped in each
+release — both are kept current there rather than duplicated here. Headline
+facts, verified:
+
+- 234 poets / **132,538** poems / 2,261 categories / 0 conversion errors /
+  263,603 Markdown files / ~1.4 GB / ~6 min to build on 4 cores. (An older
+  commit message claims 132,591 poems; `CHANGELOG.md` flags the discrepancy —
+  132,538 is the verified figure, not silently reconciled.)
+- Cross-platform entrypoint (`scripts/ganjoor.py`) + Windows shims, CI-tested
+  on Linux/macOS/Windows.
+- No GitHub Release on this repo yet — build the corpus locally.
+- `ganjoor-en` empty until v0.2 enrichment runs.
+- No graph/ontology layer yet.

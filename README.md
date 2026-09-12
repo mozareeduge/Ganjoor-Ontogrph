@@ -1,108 +1,151 @@
-# persian-poetry-ai-agent-plugin
+# Ganjoor-Ontograph
 
 **English** | [**فارسی**](README.fa.md)
 
-**Agent-ready Persian poetry for QMD** — the complete [Ganjoor](https://ganjoor.net/)
-corpus (234 poets, ~132,500 poems) converted into a searchable, multilingual,
-agent-friendly Markdown database.
+**Agent-ready Persian poetry, and a research instrument in progress.** The
+complete [Ganjoor](https://ganjoor.net/) corpus — 234 poets, 132,538 poems,
+2,261 categories — converted into a searchable, multilingual, agent-friendly
+Markdown database, exposed to AI agents over MCP.
 
-Forked from [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data)
-with an added pipeline: **JSON → Markdown → QMD index** (English semantic +
-Persian semantic + Persian exact-line search, all local).
+**This project stands on work by others.** The corpus is published by the
+[Ganjoor](https://ganjoor.net/) project as
+[ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data). The layer that
+makes it agent-ready — the JSON → Markdown conversion pipeline, the enrichment
+design, the three-collection QMD search architecture and the MCP integration —
+was built by **[Erfan Bashar](https://github.com/erfanbashar1)** in
+[erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin),
+and is used here under its MIT license.
 
-## Demo
+**Ganjoor-Ontograph** (this repo) is a fork of that project, maintained by
+[mozare](https://github.com/mozareeduge). What it adds so far: portability
+across agent harnesses and operating systems, an offline search path for
+environments that cannot download models, and a governance/hand-off document
+set. Its longer aim — not yet built — is an ontology/graph layer over the
+archive, a research instrument rather than only a search tool.
 
-*You tell your AI agent — in Persian — that you miss someone you love. It reaches into 700 years of Persian poetry and answers with the poem that meets you there.*
+Full provenance and licensing: [NOTICE.md](NOTICE.md).
 
-[![Watch the demo — a real exchange with the MCP server](docs/assets/demo-poster.jpg)](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)
+> **Repo URL note:** the project's name is **Ganjoor-Ontograph**, but it is
+> currently hosted at `github.com/mozareeduge/Ganjoor-Ontogrph` (missing the
+> second "a" — a rename is planned, see `ROADMAP.md` GO-010, but hasn't
+> happened). Every clone command and link below uses the spelling that
+> actually works today.
 
-**[▶ Watch the demo video](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — a real exchange with the MCP server: a Persian message about missing a beloved → semantic search over ~132,500 poems → [Fakhr al-Din Iraqi, Ghazal 106](https://ganjoor.net/eraghi/divane/ghazale/sh106). 30s. Pure Persian, fully local.
+## What this is for
 
-## Why
-
-Classical Persian poetry is hard to search semantically. The Ganjoor data ships
-as raw JSON with Persian summaries. This project:
-
-1. Converts every poem to a clean, self-describing Markdown file
-   (YAML frontmatter + vocalized couplets + «متن ساده» plain text + Persian خلاصه)
-2. Enriches each poem with an **English semantic summary** + topic keywords
-   (any OpenAI-compatible API — pluggable) — so retrieval works in English
-   while the poetry stays Persian
-3. Ships a **project-local QMD index** (`.qmd/index.yml`) with a multilingual
-   embedder (Qwen3-Embedding-0.6B) — English *and* Persian semantic search
-4. Is fully isolated: the index never touches your machine's global QMD state
+What exists today is a conversion + indexing + retrieval pipeline: Ganjoor's
+JSON export becomes agent-ready Markdown, searchable locally (exact text
+always; semantic search when a model is reachable) and queryable by AI
+agents over MCP. What it's *for* is bigger: a research instrument over the
+Persian classical archive — cross-poet thematic exploration, structural
+analysis across 132K+ poems, eventually an explicit ontology/graph layer
+over poets, poems, forms, metres and themes (the "ontograph" in the name).
+**That layer does not exist yet.** See [SPEC.md](SPEC.md) for the full
+framing and [ROADMAP.md](ROADMAP.md) for what's actually in progress.
 
 ## Quickstart
 
-The corpus ships as a GitHub **Release artifact** (Markdown only — you build
-the local vector index yourself, per machine).
-
 ```bash
-# Prerequisites: Python 3.10+ and QMD 2.5+
-npm install -g @tobilu/qmd
+# Prerequisite: Python 3.10+. That's it for offline/exact search.
+# Semantic search additionally needs QMD 2.5+ (2.8.3 currently verified)
+# and network access to huggingface.co to download an embedding model.
 
-# 1. Get the code
-git clone https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin.git
-cd persian-poetry-ai-agent-plugin
+git clone https://github.com/mozareeduge/Ganjoor-Ontogrph.git
+cd Ganjoor-Ontogrph
 
-# 2. Get the Markdown corpus — from the latest Release, or make with make
-#    (download ganjoor-md-v*.tar.gz from the Releases page, then:)
-tar -xzf ganjoor-md-v0.1.0.tar.gz -C md
-#    or build from the checked-in data:  python3 src/ganjoor2md.py --input . --output md
+# 1. Check what your environment can actually do — run this first
+python3 scripts/ganjoor.py doctor
 
-# 3. Build the local search index (isolated, project-local)
-export QMD_TRUST_LOCAL_CONFIG=1
-qmd update
-qmd embed -c ganjoor-fa      # Persian semantic (summary-only, by design)
-qmd embed -c ganjoor-en      # English semantic (needs summaries; v0.2+)
+# 2. Get the Markdown corpus (there is no GitHub Release on this repo yet —
+#    ROADMAP GO-011 — so build it locally from the checked-in JSON):
+python3 scripts/ganjoor.py corpus          # all 234 poets, ~6 min on 4 cores
+python3 scripts/ganjoor.py corpus --poets hafez,saadi,rumi   # or just a subset
 
-# 4. Search — Persian exact, Persian semantic, English semantic
-qmd search "که عشق آسان نمود اول ولی افتاد مشکل ها" -c ganjoor
-qmd query "شعرهایی درباره غم و گذر عمر" -c ganjoor-fa
-qmd query "poems about the pain of separation at night" -c ganjoor-en
+# 3. Index it (fast, no network, no model)
+python3 scripts/ganjoor.py index
+
+# 4. Search
+python3 scripts/ganjoor.py search "که عشق آسان نمود اول ولی افتاد مشکل ها" -c ganjoor
+python3 scripts/ganjoor.py search "همای رحمت" --offline    # no qmd, no Node, no models at all
 
 # 5. Expose it to agents via MCP
-./scripts/mcp-server.sh --daemon   # http://localhost:8191/mcp
+python3 scripts/ganjoor.py mcp             # stdio, for harness configs like .mcp.json
 ```
 
-**Prefer `make`?** The [Makefile](Makefile) wraps the same steps transparently:
-`make setup`, `make corpus`, `make index`, `make embed`, `make all`, `make search`,
-`make mcp`.
+**Semantic search** (`embed`, `query`) needs to download an embedding model
+from `huggingface.co` — unavailable in sandboxed/offline environments
+(Claude Code web/mobile, Codex cloud, air-gapped machines). That's an
+architectural constraint, not a bug. In those environments, use exact search
+(`search`, `search --offline`) instead. `ganjoor-en` (English semantic) is
+additionally empty until the v0.2 enrichment ships.
 
-Full step-by-step instructions, the pluggable LLM table, and the agent playbook
-live in [AGENTS.md](AGENTS.md). Agents that know the `persian-poetry` MCP can
-load the [persian-poetry-mcp skill](skills/persian-poetry-mcp/SKILL.md) for the
-query playbook.
+`build.sh`, `mcp-server.sh`, and `make setup|corpus|index|embed|all|search|mcp|demo`
+still work — they're thin wrappers around `scripts/ganjoor.py` now, kept for
+existing muscle memory. Run `python3 scripts/ganjoor.py --help` and
+`<subcommand> --help` for the full flag reference.
+
+## Using this from an agent harness
+
+Any MCP-capable agent can query the `persian-poetry` server (`.mcp.json`,
+stdio). Claude Code auto-detects it; other harnesses (Codex, Hermes, generic
+MCP clients) need a config — see **[docs/HARNESSES.md](docs/HARNESSES.md)**
+for exact setup and a per-harness capability matrix. Claude Code additionally
+gets the query playbook from
+[`.claude/skills/persian-poetry/SKILL.md`](.claude/skills/persian-poetry/SKILL.md).
+Deep operational detail for any agent: [AGENTS.md](AGENTS.md).
+
+## Demo
+
+*You tell your AI agent — in Persian — that you miss someone you love. It
+reaches into 700 years of Persian poetry and answers with the poem that
+meets you there.*
+
+[![Watch the demo — a real exchange with the MCP server](docs/assets/demo-poster.jpg)](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)
+
+**[▶ Watch the demo video](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — a real exchange with the MCP server: a Persian message about missing a beloved → semantic search over 132,538 poems → [Fakhr al-Din Iraqi, Ghazal 106](https://ganjoor.net/eraghi/divane/ghazale/sh106). 30s. Pure Persian, fully local.
+
+*Demo recorded by the upstream project and hosted on its release ([erfanbashar1](https://github.com/erfanbashar1)); it is linked here with credit, not re-hosted. This repo has no Release of its own yet — see `ROADMAP.md` GO-014.*
 
 ## Architecture
 
 ```
-ganjoor-data JSON (poets/, index/)          ← upstream, read-only
+Ganjoor JSON (poets/, index/)               ← upstream, read-only
         │  src/ganjoor2md.py (converter)
         ▼
 md/poets/<slug>/…            → collection "ganjoor"     → Persian exact search (BM25, no vectors)
 md/summaries-fa/<slug>/…     → collection "ganjoor-fa"  → Persian semantic search (خلاصه only)
-md/summaries-en/<slug>/…     → collection "ganjoor-en"  → English semantic + BM25
+md/summaries-en/<slug>/…     → collection "ganjoor-en"  → English semantic search (empty until v0.2)
         │  .qmd/index.yml (checked-in, project-local)
         ▼
-qmd query/search (isolated, multilingual Qwen3-Embedding)
+qmd / scripts/ganjoor.py (search, query, mcp)
 ```
 
-The three-collection split is deliberate: embeddings run **only on summaries**
-(one language each), the full poems stay in a vector-free lexical collection
-for exact-line search, and every summary file carries a `poem:` pointer back
-to the real Persian poem.
+Embeddings run only on the two summary collections, by design — full poems
+stay in a vector-free lexical collection for exact-line search, and every
+summary carries a `poem:` pointer back to the real Persian text. Why: see
+[docs/DECISIONS.md](docs/DECISIONS.md).
 
 ## Status
 
-- ✅ Data verified (234 poets, ~132,538 poems, 2.3 GB)
-- ✅ Full corpus converted (0 errors) + Persian semantic/ exact search live
-- ✅ **v0.1.0 released** — corpus artifact `ganjoor-md-v0.1.0.tar.gz`
-  (Persian-complete: poems + bios + categories + خلاصه mirrors)
-- ✅ MCP server, skill, and web demo shipped
-- ⏳ English semantic summaries: crawling (free, ~2 weeks) → **v0.2.0** adds
-  `summaries-en` to the release artifact
-- ⏳ Endorsed by Ganjoor's founder — a non-technical presentation is on the way
+- Data verified: 234 poets, **132,538** poems, 2,261 categories, 0 errors,
+  263,603 Markdown files, ~1.4 GB, ~6 min to build on 4 cores. (An older
+  commit claims 132,591 poems — see `CHANGELOG.md` for that discrepancy;
+  132,538 is the verified figure.)
+- Cross-platform: one entrypoint (`scripts/ganjoor.py`) works identically on
+  Linux/macOS/Windows (`ganjoor.cmd`/`ganjoor.ps1` shims), CI-tested on all
+  three (`.github/workflows/ci.yml`).
+- MCP server, Claude Code skill, multi-harness docs, and the web demo are
+  live; the web demo now reports engine failures honestly instead of
+  claiming "no results".
+- No GitHub Release on this repo yet (`ROADMAP.md` GO-011) — build the
+  corpus locally for now.
+- English semantic summaries (`ganjoor-en`) not yet generated — v0.2
+  (`ROADMAP.md` GO-020).
+- The ontology/graph layer is a stated direction, not built — v0.3+
+  (`ROADMAP.md`, exploratory).
+
+Full task ladder: [ROADMAP.md](ROADMAP.md). What shipped, when:
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Attribution & licensing
 

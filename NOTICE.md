@@ -1,5 +1,26 @@
 # NOTICE — data provenance, attribution, and licensing
 
+## Provenance chain
+
+This project (**Ganjoor-Ontograph** — hosted today at
+[github.com/mozareeduge/Ganjoor-Ontogrph](https://github.com/mozareeduge/Ganjoor-Ontogrph),
+spelling pending a rename tracked in `ROADMAP.md`) is the third link in a
+chain:
+
+```
+ganjoor/ganjoor-data              erfanbashar1/persian-poetry-ai-agent-plugin      Ganjoor-Ontograph
+(github.com/ganjoor/ganjoor-data)  ──▶  (github.com/erfanbashar1/...)          ──▶  (this repo)
+```
+
+| Link | Contributed |
+|---|---|
+| [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data) (via [GanjoorService](https://github.com/ganjoor/GanjoorService), the [Ganjoor](https://ganjoor.net/) project) | The corpus itself: 234 poets, ~132,500 classical Persian poems, category structure, and Persian AI-generated summaries («هوش مصنوعی:» خلاصه). See "Upstream data" below for license status. |
+| [erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin) | The conversion pipeline (JSON → agent-ready Markdown), the enrichment layer (pluggable-LLM English summaries), the three-collection QMD search architecture, the MCP server integration, and the v0.1.0 release. This repo's own git history carries these commits directly. |
+| **Ganjoor-Ontograph** (this repo) | Continuation of the above, plus: multi-harness/multi-model hand-off support (cross-platform CLI, Windows shims, per-harness MCP docs), and the governance/hand-off document set (`SPEC.md`, `ROADMAP.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `docs/DECISIONS.md`, `docs/HANDOFF.md`, this section). The stated long-term direction — not yet implemented — is an ontology/graph ("ontograph") layer over the corpus; see `SPEC.md` §1 and §6, `ROADMAP.md` v0.3+. |
+
+Keep this chain intact and credited through any future rename, fork, or
+redistribution — see "Usage rules" below.
+
 ## Upstream data
 
 The JSON corpus in this repository (`poets/`, `index/`, `manifest.json`,

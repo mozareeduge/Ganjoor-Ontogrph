@@ -1,0 +1,264 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # Cross-platform smoke test. Proves the "no Node, no qmd, no models needed"
+  # offline path actually works on Linux, macOS AND Windows, and that Persian
+  # text I/O (conversion + generated Markdown) survives Windows path/encoding
+  # quirks. Never downloads a model and never builds the full corpus — only a
+  # 2-poet / 5-poem subset (varragh, vasif).
+  cross-platform:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.12"]
+        include:
+          # Keep the Python dimension on Linux only, to keep total job count
+          # sane while still covering both supported minor versions.
+          - os: ubuntu-latest
+            python-version: "3.10"
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # `shell: bash` is set on every step below (rather than relying on the
+      # platform default, which is PowerShell on windows-latest) so the same
+      # script text runs identically on all three OSes. GitHub-hosted Windows
+      # runners ship Git for Windows, which provides the bash used here.
+      # Persian query text lives inside Python string literals (see the next
+      # step), not on a shell command line, so PowerShell quoting/encoding
+      # rules never come into play.
+
+      - name: Syntax/import-check Python entrypoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in src/ganjoor2md.py src/enrich.py scripts/ganjoor.py; do
+            if [ -f "$f" ]; then
+              python -m py_compile "$f"
+              echo "OK: $f"
+            else
+              echo "::error::expected entrypoint missing: $f"
+              exit 1
+            fi
+          done
+
+      - name: Build tiny corpus subset, validate Markdown, and offline-search it
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          import sys
+          import pathlib
+
+          # This harness prints Persian text (the query it runs). On Windows the
+          # default stdout codec is cp1252 and that print raises
+          # UnicodeEncodeError. Fix the harness's own stream only — deliberately
+          # NOT via PYTHONUTF8/PYTHONIOENCODING, because those would also apply
+          # to the child processes under test and would mask the very
+          # encoding bugs this Windows job exists to catch.
+          for _s in (sys.stdout, sys.stderr):
+              try:
+                  _s.reconfigure(encoding="utf-8", errors="replace")
+              except Exception:
+                  pass
+
+          def run(cmd):
+              print("+", " ".join(cmd))
+              r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+              if r.stdout:
+                  print(r.stdout)
+              if r.returncode != 0 and r.stderr:
+                  print(r.stderr, file=sys.stderr)
+              return r
+
+          # 1. Build a tiny, real corpus subset (2 poets, 5 poems). Exercises
+          #    real Persian text I/O and file writing, which is exactly where
+          #    Windows encoding/path bugs show up.
+          r = run([sys.executable, "scripts/ganjoor.py", "corpus", "--poets", "varragh,vasif"])
+          if r.returncode != 0:
+              sys.exit("corpus build failed (exit %d)" % r.returncode)
+
+          # 2. Validate the generated Markdown: valid UTF-8, and contains the
+          #    expected Persian sections/content.
+          md_root = pathlib.Path("md/poets")
+          files = list(md_root.rglob("*.md")) if md_root.exists() else []
+          if not files:
+              sys.exit(f"no markdown files produced under {md_root}")
+
+          target_line = "نگارینا به نقد جانت ندهم"  # نگارینا به نقد جانت ندهم
+          section_heading = "## متن ساده"  # ## متن ساده
+
+          found_section = False
+          found_line = False
+          for f in files:
+              text = f.read_text(encoding="utf-8")  # raises UnicodeDecodeError on bad UTF-8
+              if section_heading in text:
+                  found_section = True
+              if target_line in text:
+                  found_line = True
+
+          if not found_section:
+              sys.exit("expected Persian '## متن ساده' section not found in any generated file")
+          if not found_line:
+              sys.exit(f"expected line not found in generated corpus: {target_line!r}")
+          print(f"Validated {len(files)} markdown files: UTF-8 OK, Persian sections present.")
+
+          # 3. The offline fallback (no Node, no qmd, no models) must find the
+          #    poem — this is the path that has to work on every OS,
+          #    including bare Windows runners.
+          r = run([sys.executable, "scripts/ganjoor.py", "search", target_line, "--offline"])
+          if r.returncode != 0:
+              sys.exit("offline search exited non-zero (%d)" % r.returncode)
+          if "varragh" not in r.stdout.lower():
+              sys.exit("offline search did not surface the expected poem (varragh)")
+          print("Offline search found the expected poem.")
+          PY
+
+      - name: doctor reports a usable environment
+        shell: bash
+        run: python scripts/ganjoor.py doctor
+
+  # Linux-only: the real qmd path (Node + the actual @tobilu/qmd CLI), proving
+  # lexical search and the MCP stdio surface work end to end against a tiny
+  # subset — still with no model downloads (rerank explicitly disabled, no
+  # `qmd embed`/`qmd pull` call anywhere in this job).
+  qmd-integration:
+    runs-on: ubuntu-latest
+    env:
+      QMD_TRUST_LOCAL_CONFIG: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      # Pinned to the current published version (docs claim "2.5+"; 2.8.3 is
+      # what's actually on npm today). Bump deliberately, not silently.
+      - name: Install qmd
+        run: npm install -g @tobilu/qmd@2.8.3
+
+      - name: Build tiny corpus subset
+        run: python3 scripts/ganjoor.py corpus --poets varragh,vasif
+
+      # The checked-in .qmd/index.yml also declares ganjoor-en (./md/summaries-en)
+      # and ganjoor-fa (./md/summaries-fa). Neither directory exists for this
+      # 2-poet subset (varragh/vasif have no quality-gated خلاصه, and
+      # enrichment never runs in CI), so those two collections index to zero
+      # documents rather than resolving real content. `qmd update` handles a
+      # missing collection directory gracefully (0 indexed, no error) — this
+      # was verified locally — but a real search/MCP smoke test is scoped to
+      # the `ganjoor` collection only, which the subset actually populates,
+      # rather than asserting anything about the two empty collections.
+      - name: qmd update (index the subset)
+        run: qmd update
+
+      - name: qmd search (real lexical BM25 search, no models)
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import subprocess, sys
+
+          target_line = "نگارینا به نقد جانت ندهم"  # نگارینا به نقد جانت ندهم
+          r = subprocess.run(
+              ["qmd", "search", target_line, "-c", "ganjoor"],
+              capture_output=True, text=True, encoding="utf-8",
+          )
+          print(r.stdout)
+          if r.returncode != 0:
+              print(r.stderr, file=sys.stderr)
+              sys.exit("qmd search failed")
+          if "varragh" not in r.stdout:
+              sys.exit("qmd search did not surface the expected poem (varragh)")
+          print("qmd search found the expected poem.")
+          PY
+
+      # MCP stdio smoke test: initialize, then tools/call "query" scoped to
+      # the populated `ganjoor` collection with rerank explicitly disabled
+      # (rerank defaults to true and would try to download the reranker
+      # model, which is exactly what this job must not do).
+      - name: qmd mcp stdio smoke test
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import subprocess
+          import sys
+
+          target_line = "نگارینا به نقد جانت ندهم"  # نگارینا به نقد جانت ندهم
+
+          proc = subprocess.Popen(
+              ["qmd", "mcp"],
+              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+              text=True, encoding="utf-8", bufsize=1,
+          )
+
+          def send(msg):
+              proc.stdin.write(json.dumps(msg) + "\n")
+              proc.stdin.flush()
+
+          def recv():
+              line = proc.stdout.readline()
+              return json.loads(line) if line.strip() else None
+
+          try:
+              send({
+                  "jsonrpc": "2.0", "id": 1, "method": "initialize",
+                  "params": {
+                      "protocolVersion": "2025-06-18",
+                      "capabilities": {},
+                      "clientInfo": {"name": "ci-smoke", "version": "0.0.1"},
+                  },
+              })
+              init_resp = recv()
+              print("initialize response:", init_resp)
+              if not init_resp or "result" not in init_resp:
+                  sys.exit("MCP initialize failed")
+
+              send({"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}})
+
+              send({
+                  "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                  "params": {
+                      "name": "query",
+                      "arguments": {
+                          "query": target_line,
+                          "collections": ["ganjoor"],
+                          "rerank": False,
+                      },
+                  },
+              })
+              query_resp = recv()
+              print("query response:", json.dumps(query_resp, ensure_ascii=False))
+              blob = json.dumps(query_resp, ensure_ascii=False)
+              if "varragh" not in blob:
+                  sys.exit("MCP query tool did not surface the expected poem (varragh)")
+              print("MCP stdio smoke test OK")
+          finally:
+              try:
+                  proc.stdin.close()
+              except Exception:
+                  pass
+              try:
+                  proc.wait(timeout=10)
+              except subprocess.TimeoutExpired:
+                  proc.kill()
+              err = proc.stderr.read()
+              if err:
+                  print("qmd mcp stderr:", err, file=sys.stderr)
+          PY
