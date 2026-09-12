@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "persian-poetry": {
+      "command": "qmd",
+      "args": ["mcp"],
+      "env": {
+        "QMD_TRUST_LOCAL_CONFIG": "1"
+      }
+    }
+  }
+}
