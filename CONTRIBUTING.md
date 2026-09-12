@@ -104,6 +104,36 @@ full ~6-minute/1.4 GB build yourself unless asked; it is expensive and the
 owner may prefer to run it once on their own machine after reviewing the
 change.
 
+## Relationship with the upstream project
+
+Ganjoor-Ontograph is a fork of
+[erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin),
+written by a different author (see `NOTICE.md`). That project is not a former
+name of this one — it is someone else's work that this project builds on under
+its MIT license. Two practical consequences:
+
+**Keep upstream reachable.** Add it as a remote so its fixes can be pulled in:
+
+```bash
+git remote add upstream https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin.git
+git fetch upstream
+git log --oneline HEAD..upstream/main     # what upstream has that we don't
+```
+
+Merge upstream changes rather than cherry-picking where you reasonably can, so
+the shared history stays legible and later merges do not conflict repeatedly.
+
+**Offer applicable fixes back.** When a change fixes a bug that exists upstream
+too — rather than serving something specific to this fork's direction — the
+courteous and conventional thing is to open a pull request upstream as well.
+Fixes in this repository that fall into that category include the `tar -C md`
+quickstart failure, the release workflow's enrichment gate, the stale MCP
+protocol notes, and the Windows UTF-8/`qmd.cmd` handling. Credit flows both
+ways: upstream gets the fix, this fork stops carrying a private patch.
+
+Do not open pull requests against the upstream repository on the owner's behalf
+without being asked — that is a decision for a person, not an agent.
+
 ## Local-laptop ↔ cloud-repo sync flow
 
 The owner develops across a local laptop repo synced with this cloud repo,

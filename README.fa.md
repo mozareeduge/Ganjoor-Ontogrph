@@ -7,9 +7,22 @@
 ۲٬۲۶۱ دسته — را به یک دیتابیس Markdown قابل جستجو تبدیل می‌کند؛ چندزبانه،
 آفلاین و در دسترس agent ها از طریق MCP.
 
-سومین حلقهٔ یک زنجیرهٔ fork: [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data)
-← [erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin)
-← **Ganjoor-Ontograph** (همین مخزن). منبع و مجوز کامل: [NOTICE.md](NOTICE.md).
+**این پروژه بر کار دیگران ایستاده است.** خودِ گنجینهٔ داده را پروژهٔ
+[گنجور](https://ganjoor.net/) در [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data)
+منتشر می‌کند. لایه‌ای که این داده را برای agent ها قابل استفاده کرده — pipeline
+تبدیل JSON به Markdown، طراحی enrichment، معماری سه‌collection ای جستجو با QMD،
+و یکپارچگی با MCP — ساختهٔ **[عرفان بشر](https://github.com/erfanbashar1)** در
+[erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin)
+است و اینجا زیر مجوز MIT همان پروژه به کار رفته است.
+
+**Ganjoor-Ontograph** (همین مخزن) یک fork از آن پروژه است که
+[mozare](https://github.com/mozareeduge) نگه‌داری‌اش می‌کند. آنچه تا امروز
+افزوده شده: قابلیت اجرا روی harness ها و سیستم‌عامل‌های مختلف، یک مسیر جستجوی
+آفلاین برای محیط‌هایی که امکان دانلود model ندارند، و مجموعه‌سندهای حاکمیت و
+تحویل پروژه. هدف بلندمدتش — که هنوز ساخته نشده — یک لایهٔ ontology/graph روی این
+گنجینه است؛ یک ابزار پژوهشی، نه فقط یک موتور جستجو.
+
+منبع و مجوز کامل: [NOTICE.md](NOTICE.md).
 
 > **نکته دربارهٔ آدرس مخزن:** نام پروژه **Ganjoor-Ontograph** است، اما هم‌اکنون
 > در `github.com/mozareeduge/Ganjoor-Ontogrph` میزبانی می‌شود (بدون حرف "a"ی
@@ -86,7 +99,9 @@ stdio) وصل شود. Claude Code آن را خودکار تشخیص می‌ده�
 
 [![تماشای دمو — یک گفت‌وگوی واقعی با MCP server](docs/assets/demo-poster.jpg)](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)
 
-**[▶ تماشای ویدیوی دمو](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — یک گفت‌وگوی واقعی با MCP server: یک پیام فارسی دربارهٔ دوری از یار ← جستجوی معنایی در میان ۱۳۲٬۵۳۸ شعر ← [فخرالدین عراقی، غزل ۱۰۶](https://ganjoor.net/eraghi/divane/ghazale/sh106). ‏۳۰ ثانیه. تماماً فارسی، تماماً محلی. (میزبانیِ ویدیو روی release مخزن upstream است، طبق `ROADMAP.md` مورد GO-014 — این مخزن هنوز Release ندارد.)
+**[▶ تماشای ویدیوی دمو](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — یک گفت‌وگوی واقعی با MCP server: یک پیام فارسی دربارهٔ دوری از یار ← جستجوی معنایی در میان ۱۳۲٬۵۳۸ شعر ← [فخرالدین عراقی، غزل ۱۰۶](https://ganjoor.net/eraghi/divane/ghazale/sh106). ‏۳۰ ثانیه. تماماً فارسی، تماماً محلی.
+
+*این ویدیو را پروژهٔ upstream ([erfanbashar1](https://github.com/erfanbashar1)) ضبط کرده و روی release خودش میزبانی می‌شود؛ اینجا فقط با ذکر منبع به آن link داده شده، بازنشر نشده است. این مخزن هنوز Release مستقلی ندارد — ببینید `ROADMAP.md` مورد GO-014.*
 
 ## معماری
 

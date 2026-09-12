@@ -7,10 +7,23 @@ complete [Ganjoor](https://ganjoor.net/) corpus — 234 poets, 132,538 poems,
 2,261 categories — converted into a searchable, multilingual, agent-friendly
 Markdown database, exposed to AI agents over MCP.
 
-Third link in a fork chain: [ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data)
-→ [erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin)
-→ **Ganjoor-Ontograph** (this repo). Full provenance and licensing:
-[NOTICE.md](NOTICE.md).
+**This project stands on work by others.** The corpus is published by the
+[Ganjoor](https://ganjoor.net/) project as
+[ganjoor/ganjoor-data](https://github.com/ganjoor/ganjoor-data). The layer that
+makes it agent-ready — the JSON → Markdown conversion pipeline, the enrichment
+design, the three-collection QMD search architecture and the MCP integration —
+was built by **[Erfan Bashar](https://github.com/erfanbashar1)** in
+[erfanbashar1/persian-poetry-ai-agent-plugin](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin),
+and is used here under its MIT license.
+
+**Ganjoor-Ontograph** (this repo) is a fork of that project, maintained by
+[mozare](https://github.com/mozareeduge). What it adds so far: portability
+across agent harnesses and operating systems, an offline search path for
+environments that cannot download models, and a governance/hand-off document
+set. Its longer aim — not yet built — is an ontology/graph layer over the
+archive, a research instrument rather than only a search tool.
+
+Full provenance and licensing: [NOTICE.md](NOTICE.md).
 
 > **Repo URL note:** the project's name is **Ganjoor-Ontograph**, but it is
 > currently hosted at `github.com/mozareeduge/Ganjoor-Ontogrph` (missing the
@@ -89,7 +102,9 @@ meets you there.*
 
 [![Watch the demo — a real exchange with the MCP server](docs/assets/demo-poster.jpg)](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)
 
-**[▶ Watch the demo video](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — a real exchange with the MCP server: a Persian message about missing a beloved → semantic search over 132,538 poems → [Fakhr al-Din Iraqi, Ghazal 106](https://ganjoor.net/eraghi/divane/ghazale/sh106). 30s. Pure Persian, fully local. (Hosted on the upstream fork's release, per `ROADMAP.md` GO-014 — this repo has no Release yet.)
+**[▶ Watch the demo video](https://github.com/erfanbashar1/persian-poetry-ai-agent-plugin/releases/download/v0.1.1/demo.mp4)** — a real exchange with the MCP server: a Persian message about missing a beloved → semantic search over 132,538 poems → [Fakhr al-Din Iraqi, Ghazal 106](https://ganjoor.net/eraghi/divane/ghazale/sh106). 30s. Pure Persian, fully local.
+
+*Demo recorded by the upstream project and hosted on its release ([erfanbashar1](https://github.com/erfanbashar1)); it is linked here with credit, not re-hosted. This repo has no Release of its own yet — see `ROADMAP.md` GO-014.*
 
 ## Architecture
 
