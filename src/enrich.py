@@ -42,8 +42,19 @@ from pathlib import Path
 from urllib import error as urlerror
 from urllib import request
 
+# Force UTF-8 on stdout/stderr so progress lines (poet/title text is Persian)
+# can never crash the run on a Windows console whose codepage is cp1252
+# (UnicodeEncodeError on print). Threads share the process streams, so one
+# reconfigure here covers every worker.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 DEFAULT_BASE_URL = "https://api.deepseek.com/v1"
 DEFAULT_MODEL = "deepseek-v4-flash"
+DEFAULT_TIMEOUT_S = int(os.environ.get("ENRICH_TIMEOUT_S", "120"))
 SUMMARY_SECTION = "## Summary (EN)"
 
 SYSTEM_PROMPT = (
@@ -123,12 +134,35 @@ def get_poem_text(body: str) -> str:
     return m[0].strip()
 
 
+def atomic_write_text(path: Path, content: str) -> None:
+    """Write `path` atomically (write-to-temp then replace).
+
+    Mirrors ganjoor2md.write_md's convention: the temp name never ends in
+    `.md`, so it can't be picked up by the `**/*.md` QMD index pattern even
+    if the process is killed mid-write, and `Path.replace` (`os.replace`) is
+    atomic and overwrite-capable on both POSIX and Windows. This is what
+    keeps a killed/interrupted enrich run from corrupting (truncating) a
+    poem file that was already converted by ganjoor2md.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+
+
 # --------------------------------------------------------------------------
 # LLM call (stdlib urllib — zero dependencies)
 # --------------------------------------------------------------------------
 
 
-def call_llm(base_url: str, api_key: str, model: str, user_prompt: str, timeout: int = 120) -> dict:
+def call_llm(base_url: str, api_key: str, model: str, user_prompt: str, timeout: int = DEFAULT_TIMEOUT_S) -> dict:
     url = base_url.rstrip("/") + "/chat/completions"
     payload = {
         "model": model,
@@ -226,26 +260,18 @@ def enrich_one(path: Path, out_root: Path, base_url: str, api_key: str, model: s
 
     today = time.strftime("%Y-%m-%d")
 
-    # 1. Patch the poem file
-    patched = set_frontmatter_key(text, "topics_en", topics)
-    patched = set_frontmatter_key(patched, "summary_model", model)
-    patched = set_frontmatter_key(patched, "summary_date", today)
-    if SUMMARY_SECTION in patched:
-        # Replace the existing English summary section (fresh generation wins).
-        patched = re.sub(
-            r"## Summary \(EN\)\n+.*?(?=\n## |\Z)",
-            f"## Summary (EN)\n\n{summary_en}",
-            patched,
-            flags=re.S,
-        )
-    else:
-        patched = patched.rstrip() + f"\n\n{SUMMARY_SECTION}\n\n{summary_en}\n"
-    path.write_text(patched, encoding="utf-8")
-
-    # 2. Write the summaries-en mirror
+    # 1. Write the summaries-en mirror FIRST, then patch the poem file last.
+    #    Resumability is decided by `summary_model` in the *poem* file's
+    #    frontmatter (checked above) — so the poem file must be the last
+    #    thing written. If the process is killed between the two writes,
+    #    the poem file still looks unenriched on the next run (correct: the
+    #    mirror gets regenerated, no permanent gap) rather than looking done
+    #    while its mirror is missing/stale (which a killed-after-patch order
+    #    could otherwise leave behind). Both writes are atomic (write-temp +
+    #    replace), so a kill mid-write can never corrupt/truncate either the
+    #    mirror or the original poem file.
     rel = path.relative_to(out_root / "poets")
     sum_path = out_root / "summaries-en" / rel
-    sum_path.parent.mkdir(parents=True, exist_ok=True)
     poem_link = os.path.relpath(path, start=sum_path.parent)
     meta = [
         f"---",
@@ -262,7 +288,23 @@ def enrich_one(path: Path, out_root: Path, base_url: str, api_key: str, model: s
         f"summary_date: {today}",
         f"---",
     ]
-    sum_path.write_text("\n".join(meta) + f"\n\n{summary_en}\n", encoding="utf-8")
+    atomic_write_text(sum_path, "\n".join(meta) + f"\n\n{summary_en}\n")
+
+    # 2. Patch the poem file (marks this poem as done)
+    patched = set_frontmatter_key(text, "topics_en", topics)
+    patched = set_frontmatter_key(patched, "summary_model", model)
+    patched = set_frontmatter_key(patched, "summary_date", today)
+    if SUMMARY_SECTION in patched:
+        # Replace the existing English summary section (fresh generation wins).
+        patched = re.sub(
+            r"## Summary \(EN\)\n+.*?(?=\n## |\Z)",
+            f"## Summary (EN)\n\n{summary_en}",
+            patched,
+            flags=re.S,
+        )
+    else:
+        patched = patched.rstrip() + f"\n\n{SUMMARY_SECTION}\n\n{summary_en}\n"
+    atomic_write_text(path, patched)
     stats.done += 1
 
 

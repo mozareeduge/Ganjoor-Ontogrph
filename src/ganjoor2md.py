@@ -34,6 +34,16 @@ from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# Force UTF-8 on stdout/stderr so per-poet progress lines (which include
+# Persian poet names) can never crash the build on a Windows console whose
+# codepage is cp1252 (UnicodeEncodeError on print). Guarded because a
+# ProcessPoolExecutor worker's stdout may already be redirected/replaced.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 POET_FILE = "poet.json"
 CAT_FILE = "_cat.json"
 AI_PREFIX = "هوش مصنوعی:"
@@ -92,10 +102,27 @@ def normalize_search_text(text: str) -> str:
 
 
 def write_md(path: Path, content: str) -> None:
+    """Write `path` atomically (write-to-temp then replace).
+
+    The temp name is `.<name>.<pid>.tmp` — it never ends in `.md`, so it can
+    never match the `**/*.md` QMD index pattern even if a run is interrupted
+    mid-write and the temp file survives; the pid keeps two workers (or a
+    retried/resumed run) from colliding on the same temp path. `Path.replace`
+    wraps `os.replace`, which is atomic and overwrite-capable on POSIX *and*
+    Windows (unlike `os.rename`, which refuses to clobber an existing file
+    on Windows).
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(path)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(path)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def frontmatter(pairs: list) -> str:
@@ -395,11 +422,31 @@ class PoetStats:
     skipped: int = 0
 
 
+def cleanup_stale_tmp(*roots: Path) -> None:
+    """Remove leftover write_md temp files from a prior interrupted run.
+
+    They can never match the `**/*.md` index pattern (see write_md), so they
+    are harmless to the index, but they are pure debris — an interrupted
+    build (killed process, dropped VM, Ctrl-C) can leave one behind, and a
+    resumed run should not have to look at it.
+    """
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for stale in root.rglob(".*.tmp"):
+            try:
+                stale.unlink()
+            except OSError:
+                pass
+
+
 def process_poet(args) -> tuple[str, PoetStats]:
     input_root, output_root, slug, force = args
     stats = PoetStats()
     src = Path(input_root) / "poets" / slug
     dst = Path(output_root) / "poets" / slug
+    fa_dst = Path(output_root) / "summaries-fa" / slug
+    cleanup_stale_tmp(dst, fa_dst)
 
     # Poet bio
     poet_path = src / POET_FILE
