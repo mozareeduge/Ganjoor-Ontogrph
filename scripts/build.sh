@@ -18,6 +18,10 @@
 # Usage:
 #   ./scripts/build.sh                          # convert + index (no enrichment)
 #   OPENAI_API_KEY=sk-... ./scripts/build.sh    # convert + enrich + index
+#
+# Thin wrapper: the corpus/index/embed stages delegate to scripts/ganjoor.py
+# (the single cross-platform entrypoint); this script only keeps the
+# documented env-var interface stable for existing users/docs.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -25,10 +29,24 @@ cd "$REPO_ROOT"
 
 INPUT="${INPUT:-$REPO_ROOT}"
 OUTPUT="${OUTPUT:-md}"
-JOBS="${JOBS:-$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)}"
+JOBS="${JOBS:-}"
 
 echo "== Stage 1: convert JSON → Markdown =="
-python3 src/ganjoor2md.py --input "$INPUT" --output "$OUTPUT" --jobs "$JOBS"
+if [[ "$INPUT" == "$REPO_ROOT" && "$OUTPUT" == "md" ]]; then
+  # Default paths: delegate to ganjoor.py (it picks the CPU count itself
+  # when JOBS is unset — no more hardcoded/macOS-only job counts).
+  if [[ -n "$JOBS" ]]; then
+    python3 scripts/ganjoor.py corpus --jobs "$JOBS"
+  else
+    python3 scripts/ganjoor.py corpus
+  fi
+else
+  # Custom INPUT/OUTPUT: ganjoor.py's `corpus` command always reads/writes
+  # the repo's own tree, so fall back to the converter directly for this
+  # legacy case rather than dropping INPUT/OUTPUT support.
+  python3 src/ganjoor2md.py --input "$INPUT" --output "$OUTPUT" \
+    --jobs "${JOBS:-$(python3 -c 'import os; print(os.cpu_count() or 4)')}"
+fi
 
 echo
 echo "== Stage 2: enrichment (English semantic summaries) =="
@@ -41,14 +59,12 @@ fi
 
 echo
 echo "== Stage 3: project-local QMD index =="
-export QMD_TRUST_LOCAL_CONFIG=1
-qmd update
+python3 scripts/ganjoor.py index
 # Embed ONLY the summary collections. The `ganjoor` collection (full poems) is
 # intentionally BM25-only — embedding it wastes hours for nothing.
-qmd embed -c ganjoor-fa
-qmd embed -c ganjoor-en
+python3 scripts/ganjoor.py embed
 
 echo
 echo "Done. Try:"
-echo "  qmd query 'poems about the pain of separation at night' -c ganjoor-en"
-echo "  qmd search 'که عشق آسان نمود اول ولی افتاد مشکل ها' -c ganjoor"
+echo "  python3 scripts/ganjoor.py query 'poems about the pain of separation at night' -c ganjoor-en"
+echo "  python3 scripts/ganjoor.py search 'که عشق آسان نمود اول ولی افتاد مشکل ها' -c ganjoor"
