@@ -11,6 +11,18 @@ permissions:
 jobs:
   build-release:
     runs-on: ubuntu-latest
+    # Hoisted to job level (rather than set on the enrichment step alone):
+    # a step's own `env:` block is NOT visible to that same step's `if:`
+    # condition — `if:` is evaluated before the step (and its env) exists,
+    # so `if: env.OPENAI_API_KEY != ''` on a step that also *defines*
+    # OPENAI_API_KEY in its own `env:` always sees an empty value and the
+    # step is silently skipped, even with the secret configured. Job-level
+    # `env:` IS visible to every step's `if:` in that job, so defining it
+    # here makes the gate actually work instead of always-skip.
+    env:
+      OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ENRICH_MODEL: ${{ vars.ENRICH_MODEL || 'deepseek-v4-flash' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -19,7 +31,10 @@ jobs:
           python-version: "3.12"
 
       - name: Convert JSON → Markdown corpus
-        run: python3 src/ganjoor2md.py --input . --output md --jobs 4
+        # No --jobs override: ganjoor2md.py defaults to os.cpu_count(), which
+        # correctly uses all cores the runner actually has instead of a
+        # hardcoded 4.
+        run: python3 src/ganjoor2md.py --input . --output md
 
       # Enrichment is optional in CI: runs only when the OPENAI_API_KEY secret
       # is configured (any OpenAI-compatible provider; see AGENTS.md). Without
@@ -27,25 +42,92 @@ jobs:
       # and English summaries can be added locally via src/enrich.py.
       - name: Enrich English summaries (if OPENAI_API_KEY secret set)
         if: env.OPENAI_API_KEY != ''
-        env:
-          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL || 'https://api.deepseek.com/v1' }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          ENRICH_MODEL: ${{ vars.ENRICH_MODEL || 'deepseek-v4-flash' }}
         run: python3 src/enrich.py --md md --workers 8
+
+      - name: Record whether enrichment ran
+        id: enrichment
+        run: |
+          if [ -n "$OPENAI_API_KEY" ]; then
+            echo "ran=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ran=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Package the Markdown corpus
         run: |
           tar -czf ganjoor-md-${{ github.ref_name }}.tar.gz -C md .
           ls -lh ganjoor-md-${{ github.ref_name }}.tar.gz
 
+      # A release that ships a malformed artifact should fail the workflow,
+      # not reach users: actually extract the packaged tarball (the same way
+      # the docs tell consumers to: `mkdir -p md && tar -xzf ... -C md`) and
+      # assert the layout and rough size are sane before creating the release.
+      - name: Verify packaged artifact
+        id: verify
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/verify-md
+          mkdir -p /tmp/verify-md
+          tar -xzf "ganjoor-md-${{ github.ref_name }}.tar.gz" -C /tmp/verify-md
+
+          # Top level must be exactly poets/ + summaries-fa/, plus summaries-en/
+          # only when enrichment actually ran.
+          top_level=$(find /tmp/verify-md -mindepth 1 -maxdepth 1 -printf '%f\n' | sort)
+          expected="poets
+          summaries-fa"
+          if [ "${{ steps.enrichment.outputs.ran }}" = "true" ]; then
+            expected="poets
+          summaries-en
+          summaries-fa"
+          fi
+          expected_sorted=$(echo "$expected" | sed 's/^ *//' | sort)
+          if [ "$top_level" != "$expected_sorted" ]; then
+            echo "::error::Unexpected top-level layout in artifact."
+            echo "Expected:"
+            echo "$expected_sorted"
+            echo "Got:"
+            echo "$top_level"
+            exit 1
+          fi
+
+          if [ ! -d /tmp/verify-md/poets ] || [ ! -d /tmp/verify-md/summaries-fa ]; then
+            echo "::error::Artifact is missing poets/ and/or summaries-fa/."
+            exit 1
+          fi
+
+          file_count=$(find /tmp/verify-md -type f | wc -l)
+          echo "Extracted file count: $file_count"
+
+          # Sane-range guard against a truncated/empty/duplicated artifact.
+          # Known-good full build: 234 poets, 132,538 poems, 2,261 categories
+          # -> md/poets alone is ~135,033 files; md/summaries-fa mirrors a
+          # large fraction of poems (observed ~128,570); md/summaries-en adds
+          # up to ~one more file per poem when enrichment ran. 150,000 is a
+          # safe floor (catches an empty/near-empty or single-poet artifact);
+          # 450,000 is a safe ceiling (catches accidental duplication).
+          min_files=150000
+          max_files=450000
+          if [ "$file_count" -lt "$min_files" ] || [ "$file_count" -gt "$max_files" ]; then
+            echo "::error::Extracted file count $file_count is outside the sane range [$min_files, $max_files]."
+            exit 1
+          fi
+
+          echo "count=$file_count" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ "${{ steps.enrichment.outputs.ran }}" = "true" ]; then
+            EN_LINE="English semantic summaries (md/summaries-en) - present in this artifact."
+          else
+            EN_LINE="English semantic summaries (md/summaries-en) - NOT present in this artifact (enrichment did not run for this release; see AGENTS.md to add them locally)."
+          fi
           NOTES="Agent-ready Markdown corpus built from ganjoor-data.
           Full Persian corpus: poems, poet bios, category indexes (md/poets).
           Persian kholase mirrors (md/summaries-fa).
-          English semantic summaries (md/summaries-en) - present when enrichment ran.
+          $EN_LINE
+          Extracted file count: ${{ steps.verify.outputs.count }}.
           Setup: download the archive, then QMD_TRUST_LOCAL_CONFIG=1 qmd update && qmd embed (see AGENTS.md)."
           gh release create "${{ github.ref_name }}" \
             "ganjoor-md-${{ github.ref_name }}.tar.gz" \
