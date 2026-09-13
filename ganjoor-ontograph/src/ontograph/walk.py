@@ -69,6 +69,7 @@ def run_walk(
     seed: int,
     script_path: str | None,
     assessor: str,
+    assessor_type: str,
 ) -> dict:
     from ontograph.cli import (
         CLIError,
@@ -234,7 +235,7 @@ def run_walk(
     for hit, decision in hit_rows:
         active = active_decision(existing, hit.id)
         if active is not None:
-            row = supersede(active, decision, assessor_id=assessor)
+            row = supersede(active, decision, assessor_type=assessor_type, assessor_id=assessor)
             existing.append(row)
         else:
             row = HitOccurrenceAssessment(
@@ -242,14 +243,14 @@ def run_walk(
                 anchor_hit_id=hit.id,
                 object_address_id=object_address,
                 decision=decision,
-                assessor_type="human",
+                assessor_type=assessor_type,
                 assessor_id=assessor,
             )
             existing.append(row)
         append_hit_assessment(ws, row)
 
     for ev in events:
-        append_walk_event(ws, study_id, ev, seq)
+        append_walk_event(ws, study_id, ev, seq, actor_type=assessor_type)
         seq += 1
 
     summary = {"accepted": 0, "rejected": 0, "ambiguous": 0}
@@ -370,14 +371,14 @@ def _widen(ws, corpus_root, records_by_id, hits, sample, sample_size, seed):
     return [h for h in bigger if h.poem_id not in have]
 
 
-def append_walk_event(ws: Path, study_id: str, ev: dict, seq: int) -> None:
+def append_walk_event(ws: Path, study_id: str, ev: dict, seq: int, actor_type: str = "human") -> None:
     from ontograph.records import append_event
 
     append_event(ws, EventRecord(
         id=f"{study_id}-walk-{seq}",
         study_id=study_id,
         event_type=f"walk-{ev['event_type']}",
-        actor_type="human",
+        actor_type=actor_type,
         target_type=ev.get("event_type", ""),
         target_ids=ev.get("target_ids", []),
         rationale=json.dumps({k: v for k, v in ev.items()

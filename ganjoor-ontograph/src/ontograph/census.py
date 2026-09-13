@@ -144,11 +144,27 @@ def supersede(
 ) -> HitOccurrenceAssessment:
     """Create the replacement row for one hit. A superseded row may never
     be superseded again (it is history, not a live decision) -- refusing
-    here keeps every ledger row resolvable to exactly one active chain."""
+    here keeps every ledger row resolvable to exactly one active chain.
+
+    Amendment 20 §3.3 (non-erasure): a position may only supersede a prior
+    position FROM THE SAME ASSESSOR. Cross-assessor supersession is a hard
+    refusal, not a warning -- this is what makes "no object's contribution
+    erases another's" a property of the data, not a policy someone has to
+    remember. Legacy rows with no recorded assessor_id (pre-Amendment-20
+    ledger entries, assessor_id == "") are exempt: there is nothing to
+    compare identity against, so the guard cannot apply retroactively."""
     if getattr(predecessor, "_superseded", False):
         raise ValueError(
             f"row {predecessor.id} has already been superseded; "
             "supersede the ACTIVE row instead (append-only ledger)"
+        )
+    if predecessor.assessor_id and predecessor.assessor_id != assessor_id:
+        raise ValueError(
+            f"cannot supersede row {predecessor.id}: it was positioned by "
+            f"assessor {predecessor.assessor_id!r}, not {assessor_id!r} "
+            "(Amendment 20 §3.3 -- supersession is self-scoped; a different "
+            "assessor's contribution is never overwritten, only added as a "
+            "new position)"
         )
     # frozen dataclass: mark the predecessor so a second supersede attempt
     # in the same session is refused (a superseded row is history, not a

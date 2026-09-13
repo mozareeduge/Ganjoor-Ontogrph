@@ -226,7 +226,12 @@ def _source_return(hit: AnchorHit) -> dict:
     }
 
 
-def run_walk(state: WalkState, responses: list[WalkResponse]) -> WalkResult:
+def run_walk(
+    state: WalkState,
+    responses: list[WalkResponse],
+    assessor_id: str = "",
+    assessor_type: str = "human",
+) -> WalkResult:
     """Apply identity-based responses to the sample. Fails atomically on
     any unknown/stale hit ID (nothing is applied)."""
     sample_ids = {h.id for h in state.sample}
@@ -259,7 +264,8 @@ def run_walk(state: WalkState, responses: list[WalkResponse]) -> WalkResult:
             anchor_hit_id=hid,
             object_address_id=state.object_address,
             decision=decisions[hid],
-            assessor_type="human",
+            assessor_type=assessor_type,
+            assessor_id=assessor_id,
         )
         for i, hid in enumerate(decisions)
     ]

@@ -467,6 +467,7 @@ def _walk(args) -> dict:
         ws=ws, study_id=args.study_id, object_address=args.object,
         corpus_root=corpus_root, sample_size=args.sample, seed=args.seed,
         script_path=args.script, assessor=args.assessor,
+        assessor_type=args.assessor_type,
     )
     if situation_id:
         result["situation_id"] = situation_id
@@ -1322,6 +1323,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--sample", type=int, default=30)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--script"); p.add_argument("--assessor", default="human")
+    p.add_argument("--assessor-type", default="human", choices=["human", "agent", "rule"])
     p.set_defaults(func=_walk)
 
     p = top.add_parser("validate", parents=[with_corpus])
