@@ -15,6 +15,12 @@ from pathlib import Path
 
 STANCES = ("occurs", "does-not-occur", "undecidable", "out-of-scope")
 
+# Amendment 20 §9: the one-time mapping from the old adjudication grammar
+# to the new position grammar. Shared by migrate.py (one-time explicit
+# migration) and census.py (live read-time bridge for un-migrated
+# workspaces) so the two paths can never silently drift apart.
+STANCE_OF_DECISION = {"accepted": "occurs", "rejected": "does-not-occur", "ambiguous": "undecidable"}
+
 
 @dataclass(frozen=True)
 class OccurrencePosition:

@@ -228,7 +228,7 @@ def migrate_workspace(
 
 POSITIONS_MIGRATION_RECEIPT_VERSION = "1.0.0"
 
-STANCE_OF_DECISION = {"accepted": "occurs", "rejected": "does-not-occur", "ambiguous": "undecidable"}
+from ontograph.positions import STANCE_OF_DECISION  # noqa: E402
 
 
 def _legacy_assessor_id(assessor_type: str, assessor_id: str) -> str:

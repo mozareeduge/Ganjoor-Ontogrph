@@ -198,6 +198,88 @@ def active_decision(
     return live[-1] if live else None
 
 
+# --- Amendment 20 F06: live bridge from the legacy per-hit ledger into
+# the Position model, so a workspace that has never run an explicit
+# migrate_to_positions() (F04) still computes correctly through the new
+# machinery. F04 is the explicit, receipted, PERMANENT upgrade; this is a
+# read-time-only, nothing-persisted convenience that uses the identical
+# mapping (positions.STANCE_OF_DECISION, the same "legacy:<type>:<id>"
+# assessor naming) so the two paths can never disagree about a given hit.
+
+def ensure_legacy_assessors_registered(ws, ledger: list["HitOccurrenceAssessment"] | None = None) -> None:
+    """Lazily register the synthetic AssessorObjects a bridged read needs.
+    Safe to call repeatedly: skips ids already registered (by this
+    function, by a prior bridge call, or by an explicit F04 migration --
+    all three produce the exact same id for the same (type, id) pair, so
+    they can never collide, only agree)."""
+    from ontograph.assessors import AssessorObject, read_assessors, register_assessor
+
+    ledger = load_hit_assessments(ws) if ledger is None else ledger
+    real = [r for r in ledger if r.assessor_type != "legacy-poem-decision"]
+    if not real:
+        return
+    existing_ids = {a.id for a in read_assessors(ws)}
+    distinct = sorted({(r.assessor_type, r.assessor_id or "unknown") for r in real})
+    for assessor_type, assessor_id in distinct:
+        legacy_id = f"legacy:{assessor_type}:{assessor_id}"
+        if legacy_id in existing_ids:
+            continue
+        register_assessor(ws, AssessorObject(
+            id=legacy_id, label=f"legacy {assessor_type} ({assessor_id})",
+            assessor_type=assessor_type,
+            apparatus="bridged live from hit-assessments.jsonl (no explicit migration run yet)",
+            independence_class="legacy-unknown", registered_by="census-bridge",
+        ))
+
+
+def bridged_positions_for_object(
+    ws, object_address_id: str, ledger=None, already_real_hit_ids: set | None = None,
+) -> list:
+    """Synthesize `OccurrencePosition` rows, IN MEMORY ONLY (never
+    written), for hits that have no REAL position yet. Once a hit has any
+    real position (from an F04 migration or a direct future write), the
+    real ledger is authoritative for it and it is never bridged -- two
+    positions for the same fact would be redundant, not wrong, but there
+    is no reason to create the ambiguity."""
+    from ontograph.positions import STANCE_OF_DECISION, OccurrencePosition
+
+    ledger = load_hit_assessments(ws) if ledger is None else ledger
+    already_real_hit_ids = already_real_hit_ids or set()
+    by_hit: dict[str, list[HitOccurrenceAssessment]] = {}
+    for r in ledger:
+        if r.object_address_id != object_address_id:
+            continue
+        by_hit.setdefault(r.anchor_hit_id, []).append(r)
+    out = []
+    for hit_id, rows in by_hit.items():
+        if hit_id in already_real_hit_ids:
+            continue
+        active = active_decision(rows, hit_id)
+        if active is None or active.assessor_type == "legacy-poem-decision":
+            continue
+        legacy_id = f"legacy:{active.assessor_type}:{active.assessor_id or 'unknown'}"
+        out.append(OccurrencePosition(
+            id=f"bridge-{active.id}", anchor_hit_id=hit_id,
+            object_address_id=object_address_id,
+            assessor_object_id=legacy_id, stance=STANCE_OF_DECISION[active.decision],
+            rationale=active.rationale, apparatus="bridged live from hit-assessments.jsonl",
+        ))
+    return out
+
+
+def full_position_set(ws, object_address_id: str) -> list:
+    """Real positions plus legacy-bridged ones for hits with no real
+    position yet. Every coverage/Standing/resolution computation for an
+    object should read through THIS, never either ledger directly."""
+    from ontograph.positions import read_positions
+
+    real = [p for p in read_positions(ws) if p.object_address_id == object_address_id]
+    real_hit_ids = {p.anchor_hit_id for p in real}
+    ensure_legacy_assessors_registered(ws)
+    bridged = bridged_positions_for_object(ws, object_address_id, already_real_hit_ids=real_hit_ids)
+    return real + bridged
+
+
 def hit_decisions(
     hits: list[AnchorHit], ledger: list[HitOccurrenceAssessment]
 ) -> dict[str, str]:
@@ -281,6 +363,96 @@ def enforce_mode_completeness(
             coverage,
             legal_alternatives=["walk", "assessed-rule", "estimated", "anchor"],
         )
+
+
+# --- Amendment 20 §4.2/§8.2 (F06): the flat-assessment mode gate.
+# `enforce_mode_completeness` above is UNCHANGED and stays wired to the
+# old `assessed-full` CLI path for now (F07 rewires the CLI surface).
+# This is the new gate, over the Position model, for `inventory`,
+# `positioned-full`, and `positioned-concordant`.
+
+POSITIONED_MODES = ("inventory", "positioned-full", "positioned-concordant")
+
+
+class NoResolutionPolicyError(ValueError):
+    """Refused: no ResolutionPolicy declared for this object, so no
+    aggregate figure may be computed (Amendment 20 §3.4/§4.3) -- the
+    engine never silently picks a composition."""
+
+    def __init__(self, object_address_id: str) -> None:
+        self.object_address_id = object_address_id
+        super().__init__(
+            f"no ResolutionPolicy declared for {object_address_id!r} -- "
+            "the engine will not compose positions without an explicit, "
+            "disclosed choice (Amendment 20 §3.4/§4.3). Declare one: "
+            "'ontograph policy declare --kind concordance' (unanimity "
+            "among however many assessors positioned each hit), "
+            "'--kind named-assessor --assessor <id>' (one assessor's "
+            "positions only, e.g. to reproduce a solo human census), or "
+            "'--kind weighted --weights <json> --justification <text>' "
+            "(a declared numeric composition). Or use --mode inventory, "
+            "always computable, never an aggregate."
+        )
+
+
+class IncompletePositioningError(ValueError):
+    """positioned-full/positioned-concordant refused: coverage or
+    Standing requirements are not met. Carries the full composition and
+    Standing distribution so the caller can report exactly what is
+    missing, never just a bare count (Amendment 20 §2.4/§4.1/§4.2)."""
+
+    def __init__(self, mode: str, coverage: dict, standing: dict) -> None:
+        self.mode = mode
+        self.coverage = coverage
+        self.standing = standing
+        requirement = (
+            "100% eligible-hit positioning" if mode == "positioned-full"
+            else "every eligible hit to be concordant (>=2 independent "
+                 "assessors agreeing; zero contested, single-position, or "
+                 "corroborated-weak hits)"
+        )
+        alternatives = ["inventory", "estimated"]
+        if mode == "positioned-full":
+            alternatives.append("positioned-concordant (harder, not easier)")
+        super().__init__(
+            f"{mode} requires {requirement}; positioned "
+            f"{coverage['positioned_hits']}/{coverage['eligible_hits']}, "
+            f"standing={standing}. Legal alternatives: {', '.join(alternatives)}"
+        )
+
+
+def enforce_mode_requirements(mode: str, hits: list[AnchorHit], ws, object_address_id: str) -> None:
+    """Amendment 20 §4.2/§8.2's gate for the flat-assessment modes.
+    `mode` must already be the resolved (non-alias) name. No-op for
+    `anchor`/`inventory` (always computable) and `estimated` (its own
+    five conditions, §4.6, are enforced where the estimator runs)."""
+    if mode in ("anchor", "inventory", "estimated"):
+        return
+    if mode not in POSITIONED_MODES:
+        raise ValueError(f"unknown mode: {mode!r}")
+
+    from ontograph.positions import position_coverage, standing_distribution
+    from ontograph.resolution import active_policy_for
+
+    eligible_hit_ids = [h.id for h in hits]
+    positions = full_position_set(ws, object_address_id)
+    coverage = position_coverage(ws, eligible_hit_ids, object_address_id, positions=positions)
+    standing = standing_distribution(ws, eligible_hit_ids, object_address_id, positions=positions)
+
+    if active_policy_for(ws, object_address_id) is None:
+        raise NoResolutionPolicyError(object_address_id)
+
+    if mode == "positioned-full":
+        if coverage["unpositioned_hits"] > 0:
+            raise IncompletePositioningError(mode, coverage, standing)
+        return
+
+    non_concordant = (
+        standing["unpositioned"] + standing["single_position"]
+        + standing["corroborated_weak"] + standing["contested"]
+    )
+    if non_concordant > 0:
+        raise IncompletePositioningError(mode, coverage, standing)
 
 
 # --- T06: per-hit assessment ledger (append-only, spec §6.4/§6.5) ---
