@@ -41,6 +41,8 @@ from ontograph.anchors import LexicalAnchor
 from ontograph.census import (
     HitOccurrenceAssessment,
     IncompleteAssessmentError,
+    IncompletePositioningError,
+    NoResolutionPolicyError,
     OccurrenceAssessment,
     accepted_poem_ids,
     active_decision,
@@ -610,6 +612,68 @@ def _census(args) -> dict:
                 result["card"] = build_result_card("census", result)
             return result
 
+        # Amendment 20 §4.2/F07: the flat-assessment modes. A SEPARATE
+        # branch from the old assessed/assessed-full route below -- left
+        # untouched deliberately (see cli.py module note) rather than
+        # rewritten as a "positioned-full alias," to avoid changing the
+        # exact semantics ~50+ existing tests already depend on.
+        if args.mode in ("inventory", "positioned-full", "positioned-concordant"):
+            from ontograph.census import (
+                enforce_mode_requirements, full_position_set, resolved_poem_sets,
+            )
+            from ontograph.positions import position_coverage, standing_distribution
+            from ontograph.resolution import active_policy_for, policy_ablation
+
+            enforce_mode_requirements(args.mode, hits, ws, args.object)
+            eligible_poem_ids = {r.poem_id for r in records}
+            eligible_hit_ids = [h.id for h in hits]
+            positions = full_position_set(ws, args.object)
+            coverage = position_coverage(ws, eligible_hit_ids, args.object, positions=positions)
+            standing = standing_distribution(ws, eligible_hit_ids, args.object, positions=positions)
+            policy = active_policy_for(ws, args.object)
+
+            result = {
+                "object_address": args.object, "mode": args.mode,
+                "positioning": coverage, "standing": standing,
+            }
+            if policy is not None:
+                result["resolution_policy"] = {"id": policy.id, "kind": policy.kind}
+                occurs, undecidable_only = resolved_poem_sets(ws, hits, args.object, policy)
+                result["numerator"] = len(occurs & eligible_poem_ids)
+                result["denominator"] = len(eligible_poem_ids)
+                result["occurs_poems"] = sorted(occurs & eligible_poem_ids)
+                result["undecidable_or_excluded_poems"] = sorted(undecidable_only & eligible_poem_ids)
+                # F09 §2.3: policy ablation rides on every aggregate result --
+                # concordance is always a legal alternative to ablate against,
+                # unless it IS the declared policy, in which case a solo
+                # named-assessor per distinct assessor stands in instead.
+                from ontograph.resolution import ResolutionPolicy, new_policy_id
+
+                alternatives = []
+                if policy.kind != "concordance":
+                    alternatives.append(ResolutionPolicy(id=new_policy_id(), object_address_id=args.object, kind="concordance"))
+                for assessor_id in sorted(coverage["by_assessor"]):
+                    if policy.kind == "named-assessor" and policy.assessor_object_id == assessor_id:
+                        continue
+                    alternatives.append(ResolutionPolicy(
+                        id=new_policy_id(), object_address_id=args.object,
+                        kind="named-assessor", assessor_object_id=assessor_id,
+                    ))
+                if alternatives:
+                    result["policy_ablation"] = policy_ablation(
+                        ws, eligible_hit_ids, args.object, declared=policy,
+                        alternatives=alternatives, positions=positions,
+                    )
+            if situation_id:
+                result["operation_record_id"] = _persist_governed_operation(
+                    ws, args.study_id, "census", {"mode": args.mode},
+                    result, hits, records, situation_id,
+                )
+                from ontograph.result_cards import build_result_card
+
+                result["card"] = build_result_card("census", result)
+            return result
+
         # T06 governed assessed route: alias warning -> per-hit coverage
         # gate -> poem aggregation (spec §6.5/§8.1.1). Partial review is
         # refused before any computation; legacy poem-keyed rows provide
@@ -638,9 +702,29 @@ def _census(args) -> dict:
     return result
 
 
+_FLAT_ASSESSMENT_MODES = ("inventory", "positioned-full", "positioned-concordant")
+
+
+def _refuse_flat_modes_here(args, verb: str) -> None:
+    """Amendment 20 F07: `census` implements the flat-assessment modes
+    (§4.2); `map recurrence`/`companions`/`compare`/`ablate` do not yet.
+    Falling through to `_governed_assessed_poems` for one of these mode
+    names would silently compute the OLD assessed-full semantics under a
+    NEW mode's label -- exactly the silent-wrong-behavior the project's
+    own discipline forbids. Refuse clearly instead of guessing."""
+    if args.mode in _FLAT_ASSESSMENT_MODES:
+        raise CLIError(
+            f"--mode {args.mode!r} is not yet implemented for '{verb}' "
+            "(Amendment 20 F07 wired it into 'census' only so far) -- "
+            "use 'census' for a flat-assessment result on this object, "
+            "or 'anchor'/'assessed-full' here for now"
+        )
+
+
 def _map_recurrence(args) -> dict:
     if args.unit != "poem":
         raise CLIError(f"unsupported --unit {args.unit!r} in v0.1 (only 'poem' is implemented)")
+    _refuse_flat_modes_here(args, "map recurrence")
     ws = _require_workspace(args)
     situation_id = _preflight_situation(ws, args)
     conn, records = _open_cached_index(args, ws)
@@ -672,6 +756,7 @@ def _map_recurrence(args) -> dict:
 
 
 def _companions(args) -> dict:
+    _refuse_flat_modes_here(args, "companions")
     ws = _require_workspace(args)
     situation_id = _preflight_situation(ws, args)
     conn, records = _open_cached_index(args, ws)
@@ -717,6 +802,7 @@ def _companions(args) -> dict:
 
 
 def _ablate(args) -> dict:
+    _refuse_flat_modes_here(args, "ablate")
     ws = _require_workspace(args)
     situation_id = _preflight_situation(ws, args)
     if not args.remove.startswith("poet:"):
@@ -764,6 +850,7 @@ def _ablate(args) -> dict:
 
 
 def _compare(args) -> dict:
+    _refuse_flat_modes_here(args, "compare")
     ws = _require_workspace(args)
     situation_id = _preflight_situation(ws, args)
     if len(args.fields) != 2:
@@ -1405,30 +1492,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=0); p.set_defaults(func=_calibrate)
 
     p = top.add_parser("census", parents=[with_corpus]); p.add_argument("study_id")
-    p.add_argument("--object", required=True); p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
+    p.add_argument("--object", required=True); p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full", "inventory", "positioned-full", "positioned-concordant"], default="anchor")
     p.set_defaults(func=_census)
 
     map_ = top.add_parser("map").add_subparsers(dest="map_verb", required=True)
     p = map_.add_parser("recurrence", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--unit", default="poem")
-    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full", "inventory", "positioned-full", "positioned-concordant"], default="anchor")
     p.set_defaults(func=_map_recurrence)
 
     p = top.add_parser("companions", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--with", dest="with_", required=True)
     p.add_argument("--scale", default="poem"); p.add_argument("--min-support", type=int, default=5)
-    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full", "inventory", "positioned-full", "positioned-concordant"], default="anchor")
     p.set_defaults(func=_companions)
 
     p = top.add_parser("compare", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--object", required=True)
     p.add_argument("--field", dest="fields", action="append", required=True)
-    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full", "inventory", "positioned-full", "positioned-concordant"], default="anchor")
     p.set_defaults(func=_compare)
 
     p = top.add_parser("ablate", parents=[with_corpus]); p.add_argument("study_id")
     p.add_argument("--remove", required=True); p.add_argument("--rerun", required=True)
-    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full"], default="anchor")
+    p.add_argument("--mode", choices=["anchor", "assessed", "assessed-full", "inventory", "positioned-full", "positioned-concordant"], default="anchor")
     p.set_defaults(func=_ablate)
 
     p = top.add_parser("release", parents=[common]); p.add_argument("study_id")
@@ -1501,6 +1588,12 @@ def main(argv: list[str] | None = None) -> int:
     except IncompleteAssessmentError as e:
         # T06: assessed-full refusal below 100% eligible-hit coverage --
         # message carries the coverage counts and legal alternatives.
+        print(f"refused: {e}", file=sys.stderr)
+        return 1
+    except (NoResolutionPolicyError, IncompletePositioningError) as e:
+        # Amendment 20 §4.2/F07: the flat-assessment mode gate's refusals --
+        # message carries the declarable policies or the coverage/standing
+        # detail (never a bare "failed").
         print(f"refused: {e}", file=sys.stderr)
         return 1
     if args.json:

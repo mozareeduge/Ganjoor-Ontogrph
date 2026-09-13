@@ -534,6 +534,31 @@ def hit_poem_sets(
     return accepted, ambiguous_only - accepted
 
 
+def resolved_poem_sets(ws, hits: list[AnchorHit], object_address_id: str, policy) -> tuple[set[int], set[int]]:
+    """Amendment 20 §4.2/F07: the flat-assessment analogue of
+    `hit_poem_sets` above -- a poem is `occurs`-present when any of its
+    eligible hits resolves to `occurs` under `policy`; `undecidable-only`
+    when no `occurs` hit and at least one hit resolves to `undecidable`
+    (including hits `resolve()` excludes as `None`, which under
+    `concordance`'s default `contested_handling` means "excluded and
+    reported" -- treated the same as undecidable-only here, i.e. neither
+    occurring nor silently absent)."""
+    from ontograph.positions import active_positions, full_position_set
+    from ontograph.resolution import resolve
+
+    positions = full_position_set(ws, object_address_id)
+    occurs: set[int] = set()
+    undecidable_only: set[int] = set()
+    for h in hits:
+        active = active_positions(positions, h.id, object_address_id)
+        stance = resolve(ws, active, policy)
+        if stance == "occurs":
+            occurs.add(h.poem_id)
+        elif stance in ("undecidable", None):
+            undecidable_only.add(h.poem_id)
+    return occurs, undecidable_only - occurs
+
+
 def apply_assessments(
     hits: list[AnchorHit], assessments: dict[int, str]
 ) -> list[tuple[AnchorHit, str]]:
