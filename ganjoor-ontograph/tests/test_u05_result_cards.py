@@ -173,6 +173,8 @@ def test_gate_e_full_chain(tmp_path, capsys) -> None:
         "operation_or_construction": op_id,
         "observation": f"mirror assessed at {census['numerator']}/{census['denominator']}",
         "consequence": "concentrated in sample1", "limits": "fixture corpus",
+        "unsupported_zones": ["none recorded -- fixture test"],
+        "counter_evidence": ["none recorded -- fixture test"],
     }), encoding="utf-8")
     code, out, err = _run(capsys, ["record", "add", "gate-e", "--type",
                                    "finding", "--file", str(finding),

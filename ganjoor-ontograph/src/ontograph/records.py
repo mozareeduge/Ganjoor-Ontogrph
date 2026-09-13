@@ -31,6 +31,9 @@ RESEARCH_FILENAMES = {
     "profile": "profiles.jsonl",
     "experiment": "experiments.jsonl",
     "finding": "findings.jsonl",
+    "claim": "claims.jsonl",
+    "residue": "residues.jsonl",
+    "reduction": "reductions.jsonl",
 }
 
 
@@ -147,6 +150,91 @@ class FindingRecord:
     limits: str = ""
     supporting_profiles: list = dc_field(default_factory=list)
     supporting_mapping_objects: list = dc_field(default_factory=list)
+    claim_permission: str = ""
+    # Amendment 20 §6.1, ported from ref-wiki's claim-object schema (there,
+    # a REQUIRED field on every claim -- "a claim must disclose its own
+    # holes without ranking who found them"). Required here too: use an
+    # explicit placeholder like ["none recorded -- absence is not a
+    # completed search"] rather than leaving either list empty.
+    unsupported_zones: list = dc_field(default_factory=list)
+    counter_evidence: list = dc_field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.unsupported_zones:
+            raise ValueError(
+                "FindingRecord.unsupported_zones is required (Amendment 20 "
+                "§6.1, ported from ref-wiki): a Finding must disclose its own "
+                "holes. State them explicitly, e.g. "
+                "['none recorded -- absence is not a completed search']."
+            )
+        if not self.counter_evidence:
+            raise ValueError(
+                "FindingRecord.counter_evidence is required (Amendment 20 "
+                "§6.1): state what would count against this Finding, even "
+                "if none was found -- absence must be explicit, not a default."
+            )
+
+
+@dataclass(frozen=True)
+class ClaimRecord:
+    """Amendment 20 §6.1/§9's `ClaimRecord` -- spec-named but never
+    implemented before this. NOT added to `cli.U04_RECORD_TYPES`: "claim"
+    is already reserved in `cli.MACHINE_MANAGED_TYPES` (a deliberate,
+    pre-existing boundary -- claims are meant to travel a governed route,
+    not the generic `record add`), so this schema exists for that future
+    governed writer rather than being reachable today."""
+
+    id: str
+    proposition: str = ""
+    operation_or_construction: str = ""
+    claim_permission: str = ""
+    unsupported_zones: list = dc_field(default_factory=list)
+    counter_evidence: list = dc_field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.unsupported_zones:
+            raise ValueError("ClaimRecord.unsupported_zones is required (Amendment 20 §6.1)")
+        if not self.counter_evidence:
+            raise ValueError("ClaimRecord.counter_evidence is required (Amendment 20 §6.1)")
+
+
+@dataclass(frozen=True)
+class ResidueRecord:
+    """Amendment 20 §6.1, ported from ref-wiki (SYSTEM_DESIGN §2.3/
+    LIFECYCLE Stage 5): a route that was STOPPED, with why. Distinct from
+    ReductionRecord below -- ref-wiki folds the two together; this project
+    keeps them separate (spec §19 reject-to-residue vs. spec §53
+    compression), which is the finer distinction worth keeping."""
+
+    id: str
+    route_description: str = ""
+    stopped_because: str = ""
+    created_by: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.route_description:
+            raise ValueError("ResidueRecord.route_description is required")
+        if not self.stopped_because:
+            raise ValueError("ResidueRecord.stopped_because is required")
+
+
+@dataclass(frozen=True)
+class ReductionRecord:
+    """Spec §53, never implemented before this. Under Amendment 20 this
+    stops being optional: it is the only place a partial-coverage study
+    can record what it did not reach and why (§4.8)."""
+
+    id: str
+    omitted_or_compressed: str = ""
+    reason: str = ""
+    consequence: str = ""
+    recovery_route: str = ""
+    created_by: str = ""
+
+    def __post_init__(self) -> None:
+        for name in ("omitted_or_compressed", "reason", "consequence", "recovery_route"):
+            if not getattr(self, name):
+                raise ValueError(f"ReductionRecord.{name} is required (spec §53)")
 
 
 RECORD_CLASSES = {
@@ -155,6 +243,9 @@ RECORD_CLASSES = {
     "profile": ProfileRecord,
     "experiment": ExperimentRecord,
     "finding": FindingRecord,
+    "claim": ClaimRecord,
+    "residue": ResidueRecord,
+    "reduction": ReductionRecord,
 }
 
 

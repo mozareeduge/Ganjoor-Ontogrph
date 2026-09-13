@@ -113,7 +113,9 @@ def test_record_add_all_declared_types(tmp_path, capsys) -> None:
                     "source_or_witness": "fixture mini-ganjoor",
                     "access_apparatus": "direct file access"},
         "experiment": {"id": "exp-1", "research_pressure": "does X hold"},
-        "finding": {"id": "f-1", "pressure": "p", "observation": "o"},
+        "finding": {"id": "f-1", "pressure": "p", "observation": "o",
+                    "unsupported_zones": ["none recorded -- fixture test"],
+                    "counter_evidence": ["none recorded -- fixture test"]},
     }
     for rtype, payload in payloads.items():
         f = _record_file(tmp_path, f"{rtype}.json", payload)
@@ -195,7 +197,9 @@ def test_finding_citing_unframed_operation_refused(tmp_path, capsys) -> None:
     ops.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
 
     payload = {"id": "f-bad", "pressure": "p", "observation": "o",
-               "operation_or_construction": "op-old"}
+               "operation_or_construction": "op-old",
+               "unsupported_zones": ["none recorded -- fixture test"],
+               "counter_evidence": ["none recorded -- fixture test"]}
     f = _record_file(tmp_path, "fbad.json", payload)
     code, out, err = _run(
         capsys, ["record", "add", "u04-gov", "--type", "finding",

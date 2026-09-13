@@ -239,6 +239,8 @@ def test_fresh_session_scripted_fixture_replay_matches_governed_skill_route(
         "observation": f"mirror assessed at {census['numerator']}/{census['denominator']}",
         "consequence": "the fixture route can support a governed local Finding",
         "limits": "fixture corpus only",
+        "unsupported_zones": ["none recorded -- fixture test"],
+        "counter_evidence": ["none recorded -- fixture test"],
     }), encoding="utf-8")
 
     code, out, err = _run(capsys, [

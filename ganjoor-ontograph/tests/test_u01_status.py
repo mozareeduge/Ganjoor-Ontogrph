@@ -161,7 +161,11 @@ def _op(ws, situation_id="rs-1"):
 
 def _finding(ws):
     from ontograph.records import FindingRecord, write_record
-    write_record(ws, "finding", FindingRecord(id="f-1"))
+    write_record(ws, "finding", FindingRecord(
+        id="f-1",
+        unsupported_zones=["none recorded -- fixture test, not a real study"],
+        counter_evidence=["none recorded -- fixture test, not a real study"],
+    ))
 
 
 def _reviewed(ws):

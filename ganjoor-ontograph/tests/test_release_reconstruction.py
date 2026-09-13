@@ -41,6 +41,8 @@ def test_end_to_end_replay_field_charter_to_release_and_back(tmp_path):
     finding = FindingRecord(
         id="e2e-finding-1", pressure="does mirror recur across the fixture field?",
         observation="mirror has 7 anchor hits across 7 poems", limits="anchor level only, not assessed",
+        unsupported_zones=["none recorded -- fixture test, not a real study"],
+        counter_evidence=["none recorded -- fixture test, not a real study"],
     )
     write_record(ws, "profile", profile)
     write_record(ws, "finding", finding)

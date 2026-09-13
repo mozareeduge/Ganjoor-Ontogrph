@@ -70,6 +70,8 @@ def test_finding_record_round_trips(workspace):
     record = FindingRecord(
         id="finding-1", pressure="ablation", observation="retention differs by level",
         limits="fixture-only, not generalized",
+        unsupported_zones=["none recorded -- fixture test, not a real study"],
+        counter_evidence=["none recorded -- fixture test, not a real study"],
     )
     write_record(workspace, "finding", record)
     assert read_records(workspace, "finding") == [record]

@@ -913,8 +913,14 @@ MACHINE_MANAGED_TYPES = frozenset({
     "descriptive-catalog", "occurrence-policy",
 })
 
-# record add only accepts the types records.py can validate and persist
-U04_RECORD_TYPES = ("trace", "profile", "experiment", "finding")
+# record add only accepts the types records.py can validate and persist.
+# Amendment 20 F11 adds "residue"/"reduction" -- genuinely new record
+# types with no prior governed writer. Deliberately does NOT add
+# "relation" or "claim" despite both now having real RECORD_CLASSES
+# entries: both are already reserved in MACHINE_MANAGED_TYPES above, by
+# design (their own governed writers, not the generic route) -- widening
+# this tuple to include them would silently bypass that existing boundary.
+U04_RECORD_TYPES = ("trace", "profile", "experiment", "finding", "residue", "reduction")
 
 
 def _record_add(args) -> dict:

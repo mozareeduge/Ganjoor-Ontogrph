@@ -142,7 +142,11 @@ def check_gate_5_research_loop(workspace_dir: str | Path, corpus_root: str | Pat
         id="p1", addressed_object_or_relation="mirror",
         source_or_witness="poem 9101", access_apparatus="original-text",
     )
-    finding = FindingRecord(id="f1", pressure="gate5 check", observation="mirror recurs across the field")
+    finding = FindingRecord(
+        id="f1", pressure="gate5 check", observation="mirror recurs across the field",
+        unsupported_zones=["none recorded -- gate check, not a real study"],
+        counter_evidence=["none recorded -- gate check, not a real study"],
+    )
     release = generate_release(
         ws, id="gate5-release", version="0.1.0", field_charter="gate5 field",
         data_license_notice=DATA_LICENSE_NOTICE, corpus_snapshot=str(corpus_root),
