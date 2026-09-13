@@ -534,6 +534,72 @@ def hit_poem_sets(
     return accepted, ambiguous_only - accepted
 
 
+def mint_contested_traces(ws, hits: list[AnchorHit], object_address_id: str, positions=None) -> list[str]:
+    """Amendment 20 §2.4: every hit whose Position Set is `contested`
+    automatically becomes a Trace candidate -- carrying the hit, every
+    position with its apparatus/conditions/rationale, and (via the
+    stored anchor_hit_id/object_address, resolvable through `source
+    show`) a source return. Contestation is not an error to fix; this is
+    the cheapest research material the apparatus can produce.
+
+    Idempotent: a hit already covered by an auto-minted trace is never
+    minted twice, even across repeated census runs on the same object."""
+    from ontograph.positions import contested_trace_candidates
+    from ontograph.records import TraceRecord, read_records, write_record
+
+    eligible_hit_ids = [h.id for h in hits]
+    candidates = contested_trace_candidates(ws, eligible_hit_ids, object_address_id, positions=positions)
+    if not candidates:
+        return []
+
+    existing = read_records(ws, "trace")
+    already_covered = {
+        enc.get("anchor_hit_id")
+        for t in existing
+        for enc in t.initiating_encounters
+        if enc.get("source") == "amendment20-contested-auto-mint"
+        and enc.get("object_address") == object_address_id
+    }
+
+    minted_ids: list[str] = []
+    for cand in candidates:
+        hit_id = cand["anchor_hit_id"]
+        if hit_id in already_covered:
+            continue
+        descriptions = [
+            {
+                "assessor_object_id": p["assessor_object_id"],
+                "stance": p["stance"],
+                "rationale": p.get("rationale", ""),
+                "apparatus": p.get("apparatus", ""),
+            }
+            for p in cand["positions"]
+        ]
+        trace_id = f"trace-contested-{hit_id}-{object_address_id}"
+        write_record(ws, "trace", TraceRecord(
+            id=trace_id,
+            initiating_encounters=[{
+                "anchor_hit_id": hit_id, "object_address": object_address_id,
+                "source": "amendment20-contested-auto-mint",
+            }],
+            what_appeared=(
+                f"positions on hit {hit_id} for object {object_address_id!r} "
+                f"disagree ({len(descriptions)} assessors, differing stances)"
+            ),
+            candidate_descriptions=descriptions,
+            next_discriminating_action=(
+                "close-read this hit's source context (ontograph source show); "
+                "either add a corroborating position from a new independence "
+                "class, or record why the disagreement itself is the finding "
+                "(Amendment 20 §2.4)"
+            ),
+            status="active",
+            created_by="census-contested-auto-mint",
+        ))
+        minted_ids.append(trace_id)
+    return minted_ids
+
+
 def resolved_poem_sets(ws, hits: list[AnchorHit], object_address_id: str, policy) -> tuple[set[int], set[int]]:
     """Amendment 20 §4.2/F07: the flat-assessment analogue of
     `hit_poem_sets` above -- a poem is `occurs`-present when any of its

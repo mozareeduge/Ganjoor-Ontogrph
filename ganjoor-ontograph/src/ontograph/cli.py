@@ -619,7 +619,7 @@ def _census(args) -> dict:
         # exact semantics ~50+ existing tests already depend on.
         if args.mode in ("inventory", "positioned-full", "positioned-concordant"):
             from ontograph.census import (
-                enforce_mode_requirements, full_position_set, resolved_poem_sets,
+                enforce_mode_requirements, full_position_set, mint_contested_traces, resolved_poem_sets,
             )
             from ontograph.positions import position_coverage, standing_distribution
             from ontograph.resolution import active_policy_for, policy_ablation
@@ -632,9 +632,14 @@ def _census(args) -> dict:
             standing = standing_distribution(ws, eligible_hit_ids, args.object, positions=positions)
             policy = active_policy_for(ws, args.object)
 
+            # Amendment 20 §2.4/F08: contested hits automatically become
+            # Trace candidates -- never silently excluded and forgotten.
+            contested_traces_minted = mint_contested_traces(ws, hits, args.object, positions=positions)
+
             result = {
                 "object_address": args.object, "mode": args.mode,
                 "positioning": coverage, "standing": standing,
+                "contested_traces_minted": contested_traces_minted,
             }
             if policy is not None:
                 result["resolution_policy"] = {"id": policy.id, "kind": policy.kind}
