@@ -385,6 +385,55 @@ def _assessor_list(args) -> dict:
     }
 
 
+def _policy_declare(args) -> dict:
+    """Amendment 20 §4.3/F05: declare a ResolutionPolicy. Nothing in this
+    command grants precedence -- it records a versioned, disclosed choice
+    of how a Position Set composes, and every result computed under it
+    carries the same disclosure (§4.7's Claim Permission ceiling reads it)."""
+    import json as _json
+
+    from ontograph.resolution import ResolutionPolicy, declare_policy, new_policy_id
+
+    ws = _require_workspace(args)
+    weights = _json.loads(args.weights) if args.weights else None
+    policy = ResolutionPolicy(
+        id=args.id or new_policy_id(),
+        object_address_id=args.object or "*",
+        kind=args.kind,
+        assessor_object_id=args.assessor,
+        weights=weights,
+        contested_handling=args.contested_handling,
+        contestation_threshold=args.contestation_threshold,
+        min_weight_for_inclusion=args.min_weight_for_inclusion,
+        justification=args.justification or "",
+        declared_by=args.declared_by or "",
+    )
+    declare_policy(ws, policy)
+    return {
+        "id": policy.id, "object_address_id": policy.object_address_id,
+        "kind": policy.kind, "contestation_threshold": policy.contestation_threshold,
+    }
+
+
+def _policy_list(args) -> dict:
+    from ontograph.resolution import read_policies
+
+    ws = _require_workspace(args)
+    policies = read_policies(ws)
+    return {
+        "count": len(policies),
+        "policies": [
+            {
+                "id": p.id, "object_address_id": p.object_address_id, "kind": p.kind,
+                "assessor_object_id": p.assessor_object_id,
+                "contestation_threshold": p.contestation_threshold,
+                "declared_by": p.declared_by, "declared_at": p.declared_at,
+            }
+            for p in policies
+        ],
+    }
+
+
 def _object_add(args) -> dict:
     ws = _require_workspace(args)
     object_address = args.address or args.label
@@ -1318,6 +1367,26 @@ def _build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=_assessor_add)
     p = assr.add_parser("list", parents=[common]); p.add_argument("study_id")
     p.set_defaults(func=_assessor_list)
+
+    # Amendment 20 §4.3/F05: ResolutionPolicy declaration. `--object` omitted
+    # means a study-default policy ("*"); still an explicit choice, never a
+    # silent one (§3.4/§4.3 -- no policy declared means no aggregate computed).
+    pol = top.add_parser("policy").add_subparsers(dest="policy_verb", required=True)
+    p = pol.add_parser("declare", parents=[common]); p.add_argument("study_id")
+    p.add_argument("--id", default=None)
+    p.add_argument("--object", default=None)  # omitted -> study default ("*")
+    p.add_argument("--kind", required=True, choices=["none", "concordance", "named-assessor", "weighted"])
+    p.add_argument("--assessor", default=None)  # required when --kind named-assessor
+    p.add_argument("--weights", default=None)  # JSON string {assessor_id: float}; required when --kind weighted
+    p.add_argument("--contested-handling", default="excluded-and-reported",
+                    dest="contested_handling", choices=["excluded-and-reported", "counted-as-undecidable"])
+    p.add_argument("--contestation-threshold", type=float, default=None, dest="contestation_threshold")
+    p.add_argument("--min-weight-for-inclusion", type=float, default=None, dest="min_weight_for_inclusion")
+    p.add_argument("--justification", default="")  # required when --kind weighted
+    p.add_argument("--declared-by", default="", dest="declared_by")
+    p.set_defaults(func=_policy_declare)
+    p = pol.add_parser("list", parents=[common]); p.add_argument("study_id")
+    p.set_defaults(func=_policy_list)
 
     p = top.add_parser("assess", parents=[common]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--poem-id", type=int, default=None)
