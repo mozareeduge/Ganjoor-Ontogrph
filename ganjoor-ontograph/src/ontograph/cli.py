@@ -341,6 +341,50 @@ def _persist_governed_operation(
     return record["id"]
 
 
+def _assessor_add(args) -> dict:
+    """Amendment 20 §3.2/F02: register an AssessorObject. Any object may
+    assess once registered here -- a human, an agent, a rule, a retrieval
+    score. Registration carries no rank; it only makes the apparatus and
+    independence_class inspectable."""
+    from ontograph.assessors import AssessorObject, new_assessor_id, register_assessor
+
+    ws = _require_workspace(args)
+    assessor_id = args.id or new_assessor_id(args.label)
+    assessor = AssessorObject(
+        id=assessor_id,
+        label=args.label,
+        assessor_type=args.type,
+        apparatus=args.apparatus,
+        independence_class=args.independence_class,
+        conditions_of_validity=args.conditions or "",
+        registered_by=args.registered_by or "",
+    )
+    register_assessor(ws, assessor)
+    return {
+        "id": assessor.id, "label": assessor.label,
+        "assessor_type": assessor.assessor_type,
+        "independence_class": assessor.independence_class,
+    }
+
+
+def _assessor_list(args) -> dict:
+    from ontograph.assessors import read_assessors
+
+    ws = _require_workspace(args)
+    assessors = read_assessors(ws)
+    return {
+        "count": len(assessors),
+        "assessors": [
+            {
+                "id": a.id, "label": a.label, "assessor_type": a.assessor_type,
+                "independence_class": a.independence_class,
+                "apparatus": a.apparatus, "registered_at": a.registered_at,
+            }
+            for a in assessors
+        ],
+    }
+
+
 def _object_add(args) -> dict:
     ws = _require_workspace(args)
     object_address = args.address or args.label
@@ -1258,6 +1302,22 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--anchor", action="append"); p.set_defaults(func=_object_add)
     p.add_argument("--review-id")  # W06: citation of a human inquiry review
     p.add_argument("--confirmation-file")  # W06: direct human confirmation receipt
+
+    # Amendment 20 §3.2/F02: assessor identities as first-class registered
+    # objects. Any registered assessor_type may position a hit (§3.1); this
+    # verb only registers WHO/WHAT is assessing, never grants precedence.
+    assr = top.add_parser("assessor").add_subparsers(dest="assessor_verb", required=True)
+    p = assr.add_parser("add", parents=[common]); p.add_argument("study_id")
+    p.add_argument("--id", default=None)  # auto-generated (as-<hint>-<hex>) if omitted
+    p.add_argument("--label", required=True)
+    p.add_argument("--type", required=True)  # open vocabulary, see assessors.KNOWN_ASSESSOR_TYPES
+    p.add_argument("--apparatus", required=True)
+    p.add_argument("--independence-class", required=True, dest="independence_class")
+    p.add_argument("--conditions", default="")
+    p.add_argument("--registered-by", default="")
+    p.set_defaults(func=_assessor_add)
+    p = assr.add_parser("list", parents=[common]); p.add_argument("study_id")
+    p.set_defaults(func=_assessor_list)
 
     p = top.add_parser("assess", parents=[common]); p.add_argument("study_id")
     p.add_argument("--object", required=True); p.add_argument("--poem-id", type=int, default=None)
