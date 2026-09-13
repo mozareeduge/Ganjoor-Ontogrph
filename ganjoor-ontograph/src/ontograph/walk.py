@@ -70,6 +70,7 @@ def run_walk(
     script_path: str | None,
     assessor: str,
     assessor_type: str,
+    triage_order: str | None = None,
 ) -> dict:
     from ontograph.cli import (
         CLIError,
@@ -90,6 +91,22 @@ def run_walk(
             hits = [h for h in hits if h.poem_id in allowed]
         records_by_id = {r.poem_id: r for r in records}
         sample = calibration_sample(hits, sample_size=sample_size, seed=seed)
+
+        # Amendment 20 §4.9/F13: order the sample by non-human triage
+        # confidence, when requested. `weight` NEVER decides an outcome
+        # (see positions.OccurrencePosition's docstring) -- this is its
+        # only legal use here: attention ordering, not resolution.
+        if triage_order:
+            from ontograph.census import full_position_set
+            from ontograph.positions import queue_by_weight
+
+            positions = full_position_set(ws, object_address)
+            hit_by_id = {h.id: h for h in sample}
+            ordered_ids = queue_by_weight(
+                positions, list(hit_by_id), object_address, order=triage_order,
+            )
+            sample = [hit_by_id[hid] for hid in ordered_ids]
+
         ladders = [open_context_ladder(h, records_by_id[h.poem_id].path) for h in sample]
     finally:
         conn.close()
