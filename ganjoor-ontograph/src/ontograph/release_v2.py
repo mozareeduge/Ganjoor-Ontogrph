@@ -24,6 +24,9 @@ RELEASE_RECORD_TYPES = (
     "object-addresses", "lexical-anchors", "occurrence-assessments",
     "occurrence-policies", "operations", "profiles", "mappings", "traces",
     "experiments", "findings", "relation-objects", "claims", "reductions",
+    "residues",  # Amendment 20 F12: "reductions" was already listed; this
+                 # sibling record type (route-stopped, distinct from
+                 # something-compressed) was missing from the release layout.
     "events", "research-situations", "seeds", "inquiry-catalogs",
     "inquiry-reviews", "descriptive-catalogs",
 )
@@ -173,6 +176,10 @@ def collect_governed_release(
         ("occurrence-assessments", "corpus/hit-assessments.jsonl"),
         ("traces", "research/traces.jsonl"),
         ("findings", "research/findings.jsonl"),
+        # Amendment 20 F12: staged so the release report's handoff
+        # sections have real data instead of always reading "none".
+        ("residues", "research/residues.jsonl"),
+        ("reductions", "research/reductions.jsonl"),
     ):
         path = workspace / rel
         payloads[rtype] = (

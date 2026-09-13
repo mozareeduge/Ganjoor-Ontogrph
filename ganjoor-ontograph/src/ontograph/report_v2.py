@@ -30,6 +30,10 @@ def render_release_reports(release_dir: Path) -> tuple[Path, Path]:
     situations = _load_jsonl(release_dir / "records" / "research-situations.jsonl")
     catalogs = _load_jsonl(release_dir / "records" / "inquiry-catalogs.jsonl")
     reviews = _load_jsonl(release_dir / "records" / "inquiry-reviews.jsonl")
+    # Amendment 20 F12: assessment composition + ported handoff sections
+    traces = _load_jsonl(release_dir / "records" / "traces.jsonl")
+    residues = _load_jsonl(release_dir / "records" / "residues.jsonl")
+    reductions = _load_jsonl(release_dir / "records" / "reductions.jsonl")
 
     md_lines = [
         f"# Research Release v{release['version']}",
@@ -121,6 +125,91 @@ def render_release_reports(release_dir: Path) -> tuple[Path, Path]:
         for lim in op.get("limitations", []):
             md_lines.append(f"- limitation: {lim}")
             html_parts.append(f"<p>limitation: {html.escape(lim)}</p>")
+
+    # --- Amendment 20 §6.1.5/§8.7: Assessment composition ---
+    # Every operation whose result carries `positioning` (the flat-
+    # assessment modes, F07-F09) gets a legible summary here -- never
+    # just the raw JSON already printed above under "Operations".
+    md_lines.append("")
+    md_lines.append("## Assessment composition")
+    html_parts.append("<h2>Assessment composition</h2>")
+    flat_ops = [op for op in operations if (op.get("result") or {}).get("positioning")]
+    if not flat_ops:
+        md_lines.append("- _(no flat-assessment operations in this release)_")
+        html_parts.append("<p><em>no flat-assessment operations in this release</em></p>")
+    for op in flat_ops:
+        result = op["result"]
+        positioning = result.get("positioning", {})
+        standing = result.get("standing", {})
+        policy = result.get("resolution_policy")
+        eligible = positioning.get("eligible_hits", 0) or 0
+        contested = standing.get("contested", 0) or 0
+        rate = f"{contested / eligible:.0%}" if eligible else "n/a"
+        by_assessor = positioning.get("by_assessor", {})
+        assessor_line = ", ".join(f"{aid}: {n}" for aid, n in sorted(by_assessor.items())) or "(none)"
+        policy_line = f"{policy['kind']} (`{policy['id']}`)" if policy else "none declared"
+        md_lines += [
+            f"### `{op['id']}` — mode `{result.get('mode')}`",
+            f"- positioned {positioning.get('positioned_hits', 0)}/{eligible} eligible hits",
+            f"- per-assessor: {assessor_line}",
+            f"- standing: concordant={standing.get('concordant', 0)}, "
+            f"corroborated-weak={standing.get('corroborated_weak', 0)}, "
+            f"single-position={standing.get('single_position', 0)}, "
+            f"contested={standing.get('contested', 0)} (contestation rate: {rate})",
+            f"- resolution policy: {policy_line}",
+        ]
+        if result.get("policy_ablation"):
+            ablation = result["policy_ablation"]
+            md_lines.append(
+                f"- policy ablation: declared `{ablation['declared']['kind']}` -> "
+                f"{ablation['declared']['occurs']} occurs; alternatives: "
+                + ", ".join(f"`{a['kind']}` -> {a['occurs']}" for a in ablation["alternatives"])
+            )
+        html_parts.append(
+            f"<h3><code>{html.escape(op['id'])}</code> — mode {html.escape(str(result.get('mode')))}</h3>"
+            f"<p>positioned {positioning.get('positioned_hits', 0)}/{eligible}; "
+            f"per-assessor: {html.escape(assessor_line)}; "
+            f"contestation rate: {rate}; policy: {html.escape(policy_line)}</p>"
+        )
+        if result.get("contested_traces_minted"):
+            md_lines.append(f"- contested traces auto-minted: {', '.join(result['contested_traces_minted'])}")
+
+    # --- ported handoff sections (ref-wiki TEMPLATE_handoff.md, §6.1.5) ---
+    # Present even when empty -- a release never silently omits a section
+    # that would have carried a warning.
+    md_lines.append("")
+    md_lines.append("## Decisions not made")
+    html_parts.append("<h2>Decisions not made</h2>")
+    if reductions:
+        for r in reductions:
+            md_lines.append(
+                f"- {r.get('omitted_or_compressed')} — {r.get('reason')} "
+                f"(consequence: {r.get('consequence')}; recovery: {r.get('recovery_route')})"
+            )
+    else:
+        md_lines.append("- _(none recorded)_")
+    html_parts.append(f"<p>{len(reductions)} reduction(s) recorded</p>")
+
+    md_lines.append("")
+    md_lines.append("## Unresolved findings")
+    html_parts.append("<h2>Unresolved findings</h2>")
+    active_traces = [t for t in traces if t.get("status") == "active"]
+    if active_traces:
+        for t in active_traces:
+            md_lines.append(f"- trace `{t.get('id')}`: {t.get('what_appeared')} — next: {t.get('next_discriminating_action')}")
+    else:
+        md_lines.append("- _(none recorded)_")
+    html_parts.append(f"<p>{len(active_traces)} active (unresolved) trace(s)</p>")
+
+    md_lines.append("")
+    md_lines.append("## Negative constraints")
+    html_parts.append("<h2>Negative constraints</h2>")
+    if residues:
+        for r in residues:
+            md_lines.append(f"- {r.get('route_description')} — stopped: {r.get('stopped_because')}")
+    else:
+        md_lines.append("- _(none recorded)_")
+    html_parts.append(f"<p>{len(residues)} residue(s) recorded</p>")
 
     md_lines.append("")
     md_lines.append(f"Record counts: {json.dumps(release['record_counts'])}")
