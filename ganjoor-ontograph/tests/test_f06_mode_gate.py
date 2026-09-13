@@ -23,6 +23,7 @@ from ontograph.census import (
     NoResolutionPolicyError,
     append_hit_assessment,
     enforce_mode_requirements,
+    ensure_legacy_assessors_registered,
     full_position_set,
     new_hit_assessment_id,
 )
@@ -159,17 +160,41 @@ def test_positioned_concordant_passes_when_truly_concordant(tmp_path: Path) -> N
     enforce_mode_requirements("positioned-concordant", hits, ws, OBJ)  # must not raise
 
 
-def test_real_position_takes_precedence_over_bridge_for_same_hit(tmp_path: Path) -> None:
-    """Once a hit has a real position, it is never also bridged from the
-    legacy ledger -- avoids a redundant synthetic duplicate."""
+def test_real_position_from_a_new_assessor_does_not_suppress_a_different_legacy_bridge(tmp_path: Path) -> None:
+    """A real position from a NEW assessor ('as-mz') must not hide a
+    DIFFERENT legacy assessor's ('someone-else') already-bridged
+    contribution to the same hit -- both are real, distinct positions and
+    non-erasure applies across the bridge boundary too. (Corrected from
+    an earlier, over-coarse per-HIT suppression rule that would have made
+    adding a corroborating assessor silently erase the original bridged
+    position -- caught by test_f10_claims.py's corroboration scenario.)"""
     ws = _ws(tmp_path)
     register_assessor(ws, AssessorObject(id="as-mz", label="mz", assessor_type="human", apparatus="x", independence_class="human-mz"))
     append_hit_assessment(ws, HitOccurrenceAssessment(
         id=new_hit_assessment_id(), anchor_hit_id="ah1-1",
         object_address_id=OBJ, decision="rejected", assessor_type="human", assessor_id="someone-else",
     ))
-    position_for(ws, "ah1-1", OBJ, "as-mz", "occurs")  # a REAL position on the same hit
+    position_for(ws, "ah1-1", OBJ, "as-mz", "occurs")  # a REAL position, a DIFFERENT assessor
 
     positions = full_position_set(ws, OBJ)
-    assert len(positions) == 1  # not 2 -- the bridge did not also synthesize one
-    assert positions[0].assessor_object_id == "as-mz"
+    assert len(positions) == 2  # both are visible: as-mz (real) AND legacy:human:someone-else (bridged)
+    assert {p.assessor_object_id for p in positions} == {"as-mz", "legacy:human:someone-else"}
+
+
+def test_real_position_from_the_same_legacy_assessor_suppresses_its_own_bridge(tmp_path: Path) -> None:
+    """The narrower, correct case the suppression rule IS for: once the
+    SAME legacy assessor identity has a real position (e.g. after an F04
+    migration), its own bridge entry is not also synthesized -- avoiding
+    a duplicate of the exact same fact."""
+    ws = _ws(tmp_path)
+    append_hit_assessment(ws, HitOccurrenceAssessment(
+        id=new_hit_assessment_id(), anchor_hit_id="ah1-1",
+        object_address_id=OBJ, decision="rejected", assessor_type="human", assessor_id="mz",
+    ))
+    ensure_legacy_assessors_registered(ws)
+    position_for(ws, "ah1-1", OBJ, "legacy:human:mz", "occurs")  # same identity the bridge would use
+
+    positions = full_position_set(ws, OBJ)
+    assert len(positions) == 1  # the real one only -- not duplicated by its own bridge
+    assert positions[0].stance == "occurs"  # the REAL (later) position wins, not the stale bridge read
+    assert positions[0].assessor_object_id == "legacy:human:mz"

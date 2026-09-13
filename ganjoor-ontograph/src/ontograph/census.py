@@ -233,18 +233,23 @@ def ensure_legacy_assessors_registered(ws, ledger: list["HitOccurrenceAssessment
 
 
 def bridged_positions_for_object(
-    ws, object_address_id: str, ledger=None, already_real_hit_ids: set | None = None,
+    ws, object_address_id: str, ledger=None, already_real_pairs: set[tuple] | None = None,
 ) -> list:
     """Synthesize `OccurrencePosition` rows, IN MEMORY ONLY (never
-    written), for hits that have no REAL position yet. Once a hit has any
-    real position (from an F04 migration or a direct future write), the
-    real ledger is authoritative for it and it is never bridged -- two
-    positions for the same fact would be redundant, not wrong, but there
-    is no reason to create the ambiguity."""
+    written), for (hit, legacy-assessor) pairs that have no REAL position
+    yet. Once THAT SAME legacy assessor has a real position on a hit
+    (from an F04 migration, or the legacy ledger being replayed twice),
+    it is never also bridged -- two positions for the same fact would be
+    redundant. Scoped per-(hit, assessor), not per-hit alone: a hit with
+    a NEW real position from a DIFFERENT assessor still gets its original
+    legacy assessor's position bridged in alongside it -- otherwise adding
+    one genuinely new assessor's position would silently make an
+    already-two-assessor hit look single-positioned, hiding the exact
+    corroboration a researcher just went to the trouble of adding."""
     from ontograph.positions import STANCE_OF_DECISION, OccurrencePosition
 
     ledger = load_hit_assessments(ws) if ledger is None else ledger
-    already_real_hit_ids = already_real_hit_ids or set()
+    already_real_pairs = already_real_pairs or set()
     by_hit: dict[str, list[HitOccurrenceAssessment]] = {}
     for r in ledger:
         if r.object_address_id != object_address_id:
@@ -252,12 +257,12 @@ def bridged_positions_for_object(
         by_hit.setdefault(r.anchor_hit_id, []).append(r)
     out = []
     for hit_id, rows in by_hit.items():
-        if hit_id in already_real_hit_ids:
-            continue
         active = active_decision(rows, hit_id)
         if active is None or active.assessor_type == "legacy-poem-decision":
             continue
         legacy_id = f"legacy:{active.assessor_type}:{active.assessor_id or 'unknown'}"
+        if (hit_id, legacy_id) in already_real_pairs:
+            continue
         out.append(OccurrencePosition(
             id=f"bridge-{active.id}", anchor_hit_id=hit_id,
             object_address_id=object_address_id,
@@ -268,15 +273,16 @@ def bridged_positions_for_object(
 
 
 def full_position_set(ws, object_address_id: str) -> list:
-    """Real positions plus legacy-bridged ones for hits with no real
-    position yet. Every coverage/Standing/resolution computation for an
-    object should read through THIS, never either ledger directly."""
+    """Real positions plus legacy-bridged ones for (hit, legacy-assessor)
+    pairs with no real position yet. Every coverage/Standing/resolution
+    computation for an object should read through THIS, never either
+    ledger directly."""
     from ontograph.positions import read_positions
 
     real = [p for p in read_positions(ws) if p.object_address_id == object_address_id]
-    real_hit_ids = {p.anchor_hit_id for p in real}
+    real_pairs = {(p.anchor_hit_id, p.assessor_object_id) for p in real}
     ensure_legacy_assessors_registered(ws)
-    bridged = bridged_positions_for_object(ws, object_address_id, already_real_hit_ids=real_hit_ids)
+    bridged = bridged_positions_for_object(ws, object_address_id, already_real_pairs=real_pairs)
     return real + bridged
 
 
@@ -609,7 +615,7 @@ def resolved_poem_sets(ws, hits: list[AnchorHit], object_address_id: str, policy
     `concordance`'s default `contested_handling` means "excluded and
     reported" -- treated the same as undecidable-only here, i.e. neither
     occurring nor silently absent)."""
-    from ontograph.positions import active_positions, full_position_set
+    from ontograph.positions import active_positions
     from ontograph.resolution import resolve
 
     positions = full_position_set(ws, object_address_id)

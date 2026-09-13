@@ -970,6 +970,27 @@ def _record_add(args) -> dict:
             if not ok:
                 raise CLIError(f"finding refused: {why}")
 
+            # Amendment 20 §4.7/F10: the declared claim_permission may never
+            # exceed the ceiling its cited operation's result supports. An
+            # undeclared/empty claim_permission is never checked (nothing
+            # was claimed beyond what recording the Finding itself does).
+            declared = getattr(record, "claim_permission", "") or ""
+            if declared:
+                from ontograph.claims import ClaimPermissionError, ceiling_for, exceeds_ceiling
+                from ontograph.operations import read_operation_records
+
+                op_record = next(
+                    (o for o in read_operation_records(ws) if o.get("id") == cited), None,
+                )
+                if op_record is not None:
+                    ceiling = ceiling_for(ws, op_record)
+                    if exceeds_ceiling(declared, ceiling):
+                        raise CLIError(str(ClaimPermissionError(
+                            declared, ceiling,
+                            "composition and contestation don't support this reach yet "
+                            "-- corroborate with an independent assessor, or reduce the claim",
+                        )))
+
     write_record(ws, rtype, record)
     return {"record_id": record.id, "type": rtype}
 
