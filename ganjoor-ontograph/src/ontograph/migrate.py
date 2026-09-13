@@ -216,3 +216,152 @@ def migrate_workspace(
             + "\n"
         )
     return receipt
+
+
+# --- Amendment 20 §9/F04: hit-assessments.jsonl -> occurrence-positions.jsonl ---
+#
+# A SEPARATE migration from migrate_workspace() above (which handles T03's
+# poem-keyed -> hit-keyed upgrade). This one upgrades the hit-keyed
+# HitOccurrenceAssessment ledger (T05-era, one active row per hit, human
+# implied) into the flat-assessment OccurrencePosition model (Amendment
+# 20 §3.1, many co-existing positions per hit, no implied assessor).
+
+POSITIONS_MIGRATION_RECEIPT_VERSION = "1.0.0"
+
+STANCE_OF_DECISION = {"accepted": "occurs", "rejected": "does-not-occur", "ambiguous": "undecidable"}
+
+
+def _legacy_assessor_id(assessor_type: str, assessor_id: str) -> str:
+    return f"legacy:{assessor_type}:{assessor_id or 'unknown'}"
+
+
+def preview_positions_migration(workspace: str | Path) -> dict:
+    """Preview ONLY: identical detection, zero writes (mirrors
+    preview_migration's contract for the T03 migration)."""
+    from ontograph.census import load_hit_assessments
+
+    ws = Path(workspace)
+    rows = load_hit_assessments(ws)
+    to_migrate = [r for r in rows if r.assessor_type != "legacy-poem-decision"]
+    skipped = [r for r in rows if r.assessor_type == "legacy-poem-decision"]
+    distinct = sorted({(r.assessor_type, r.assessor_id or "unknown") for r in to_migrate})
+    return {
+        "workspace": str(ws),
+        "positions_to_create": len(to_migrate),
+        "legacy_poem_decisions_skipped": len(skipped),
+        "assessors_to_synthesize": [_legacy_assessor_id(t, i) for t, i in distinct],
+        "object_addresses": sorted({r.object_address_id for r in to_migrate}),
+    }
+
+
+def migrate_to_positions(workspace: str | Path, apply: bool) -> dict:
+    """Amendment 20 §9. Non-destructive, `--apply`-gated, before/after-hash
+    receipt.
+
+    1. Each `hit-assessments.jsonl` row with a real per-hit decision
+       becomes exactly ONE `OccurrencePosition` -- never fanned. Rows are
+       replayed in file order, so a hit that was re-decided multiple times
+       by the SAME (assessor_type, assessor_id) reconstructs the same
+       supersession chain through `positions.position_for()`'s own
+       same-assessor-active-lookup; a hit decided by two DIFFERENT legacy
+       identities keeps both as separate, non-erasing positions (which the
+       old flat ledger could never actually represent, since it only ever
+       tracked one active row per hit -- see the policy note below).
+    2. `legacy-poem-decision` rows (poem-keyed, no anchor_hit_id) are left
+       untouched wherever they already live and are never converted --
+       they continue to provide zero coverage exactly as before (Amendment
+       20 §3.2's one non-hierarchical, structural exception).
+    3. Each migrated study gets an explicit `ResolutionPolicy`, declared
+       by "migration", so the pre-Amendment-20 numbers stay reproducible
+       as a visible choice rather than a hidden default.
+
+       DEVIATION FROM THE AMENDMENT'S LITERAL TEXT, judged deliberately:
+       the Amendment's §9 prose names `named-assessor(legacy:human:*)` as
+       the synthesized policy. That kind requires exactly ONE
+       assessor_object_id (§4.3); no wildcard mechanism exists or was
+       built. It would silently give wrong numbers on any study where the
+       old ledger recorded more than one distinct (assessor_type,
+       assessor_id) pair (e.g. two different --assessor values used
+       across sessions). Since the OLD model only ever kept ONE active
+       row per hit regardless of how many distinct ids touched it, every
+       hit has exactly one legacy-synthesized position after migration --
+       which makes `kind="concordance"` trivially and ALWAYS equivalent
+       to the old single-decision semantics (unanimity among exactly one
+       position is automatic), for any number of distinct legacy
+       identities. Used here instead.
+    4. Idempotent: if `occurrence-positions.jsonl` already has content,
+       this is a no-op, not a duplicate.
+    """
+    from ontograph.assessors import AssessorObject, read_assessors, register_assessor
+    from ontograph.census import load_hit_assessments
+    from ontograph.positions import _ledger_path as _positions_ledger_path
+    from ontograph.positions import position_for
+    from ontograph.resolution import ResolutionPolicy, declare_policy, new_policy_id
+
+    ws = Path(workspace)
+    before = _dir_hash(ws, exclude=RECEIPT_REL_PATH)
+    preview = preview_positions_migration(ws)
+    if not apply:
+        return {"applied": False, "before_content_hash": before, **preview}
+
+    positions_path = _positions_ledger_path(ws)
+    if positions_path.exists() and positions_path.read_text(encoding="utf-8").strip():
+        return {"applied": True, "no_op": True, "reason": "occurrence-positions.jsonl already populated", **preview}
+
+    rows = load_hit_assessments(ws)
+    to_migrate = [r for r in rows if r.assessor_type != "legacy-poem-decision"]
+
+    # 1. synthesize one AssessorObject per distinct (assessor_type, assessor_id)
+    existing_ids = {a.id for a in read_assessors(ws)}
+    distinct = sorted({(r.assessor_type, r.assessor_id or "unknown") for r in to_migrate})
+    for assessor_type, assessor_id in distinct:
+        legacy_id = _legacy_assessor_id(assessor_type, assessor_id)
+        if legacy_id in existing_ids:
+            continue
+        register_assessor(ws, AssessorObject(
+            id=legacy_id,
+            label=f"legacy {assessor_type} ({assessor_id})",
+            assessor_type=assessor_type,
+            apparatus="migrated from pre-Amendment-20 hit-assessments.jsonl; "
+                      "no richer apparatus record exists for pre-migration rows",
+            independence_class="legacy-unknown",
+            registered_by="migration",
+        ))
+
+    # 2. one row in -> one position out, in file order (reconstructs same-
+    #    assessor supersession chains faithfully; never fans across hits)
+    created = 0
+    for r in to_migrate:
+        legacy_id = _legacy_assessor_id(r.assessor_type, r.assessor_id or "unknown")
+        position_for(
+            ws, r.anchor_hit_id, r.object_address_id, legacy_id,
+            STANCE_OF_DECISION[r.decision],
+            rationale=r.rationale,
+            apparatus="migrated (see AssessorObject.apparatus)",
+        )
+        created += 1
+
+    # 3. explicit, visible policy declaration preserving old behaviour --
+    #    see the docstring above for why `concordance`, not `named-assessor`
+    declare_policy(ws, ResolutionPolicy(
+        id=new_policy_id(),
+        object_address_id="*",
+        kind="concordance",
+        declared_by="migration",
+        justification="",
+    ))
+
+    receipt = {
+        "schema_version": POSITIONS_MIGRATION_RECEIPT_VERSION,
+        "migration_type": "positions",
+        "before_content_hash": before,
+        "after_content_hash": _dir_hash(ws, exclude=RECEIPT_REL_PATH),
+        "positions_created": created,
+        "legacy_poem_decisions_skipped": preview["legacy_poem_decisions_skipped"],
+        "assessors_synthesized": preview["assessors_to_synthesize"],
+    }
+    receipts = ws / "corpus" / "migration-receipts.jsonl"
+    receipts.parent.mkdir(parents=True, exist_ok=True)
+    with receipts.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(receipt, ensure_ascii=False) + "\n")
+    return {"applied": True, "no_op": False, **receipt}
