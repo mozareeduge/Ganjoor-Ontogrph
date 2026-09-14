@@ -57,7 +57,7 @@ from ontograph.census import (
     supersede,
 )
 from ontograph.compare import MODE_ANCHOR, MODE_ASSESSED, InsufficientSupportError, compare_fields, lift, typed_coincidence
-from ontograph.field import FieldCharter, ScopeSpec, all_poems, poet, scope_from_dict
+from ontograph.field import FieldCharter, ScopeSpec, all_poems, difference, poet, scope_from_dict, union
 from ontograph.index_cache import (
     census_from_index,
     get_or_build_index,
@@ -250,12 +250,31 @@ def _field_build(args) -> dict:
     if args.category:
         raise CLIError(
             "--category is not supported in v0.1 (ScopeSpec has no category "
-            "leaf kind yet); use --poet or omit both for the full field"
+            "leaf kind yet); use --poet/--exclude-poet or omit all three for "
+            "the full field"
         )
     corpus_root = _resolve_corpus_root(args, ws)
     conn, records = _open_cached_index(args, ws)
     try:
-        scope: ScopeSpec = poet(args.poet) if args.poet else all_poems()
+        # G21 (L3.4/V201): minimum viable scope-exclusion grammar.
+        # --poet is repeatable (unioned); --exclude-poet is repeatable
+        # (subtracted). field.py's ScopeSpec already implements
+        # union/intersect/difference, tested since the F06 era -- this is
+        # the CLI surface, not new engine work. The full
+        # all|none|poet:x|union(...)|intersect(...)|difference(...) parser
+        # from execution spec Sec8 (row V201) remains a stretch goal, not
+        # required for the case that actually blocked a real study
+        # (excluding Ferdowsi's Shahnameh from a field with one call).
+        poets = args.poet or []
+        excludes = args.exclude_poet or []
+        if poets:
+            scope: ScopeSpec = poet(poets[0])
+            for slug in poets[1:]:
+                scope = union(scope, poet(slug))
+        else:
+            scope = all_poems()
+        for slug in excludes:
+            scope = difference(scope, poet(slug))
         charter = FieldCharter(
             purpose=f"field for study {args.study_id}",
             corpus_snapshot=str(corpus_root),
@@ -1506,7 +1525,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     field = top.add_parser("field").add_subparsers(dest="field_verb", required=True)
     p = field.add_parser("build", parents=[with_corpus]); p.add_argument("study_id")
-    p.add_argument("--poet"); p.add_argument("--category")
+    p.add_argument("--poet", action="append")  # G21 (L3.4/V201): repeatable, unioned
+    p.add_argument("--exclude-poet", action="append")  # G21: repeatable, subtracted
+    p.add_argument("--category")
     p.add_argument("--include-poem-ids", action="store_true")  # G18 (L3.7): opt-in, was always-on
     p.set_defaults(func=_field_build)
 
