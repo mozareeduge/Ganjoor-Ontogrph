@@ -92,22 +92,27 @@ def corpus_snapshot(root: str | Path) -> "CorpusSnapshot":
     commit-or-none + NUL + manifest-sha256 + NUL + content-signal-sha256.
     Absolute corpus paths are metadata, not identity, so a portable clean
     copy receives the SAME id. The commit is read from the root's own git
-    metadata when available; `None` when the root is not a git checkout."""
+    metadata when available; `None` when the root is not a git checkout.
+
+    G20 (L3.1): a clean, fully-tracked git checkout uses the SAME fast
+    path `index_cache.cache_identity()` already has -- commit SHA +
+    manifest hash, no corpus walk -- instead of unconditionally reading
+    and SHA-256ing every poem file's bytes (`corpus_content_signal()`,
+    measured at 780s cold on the real ~132K-file corpus; ~10s once the OS
+    file cache is warm, so the cost is disk I/O, not CPU). A dirty or
+    non-git root still falls back to the full, honest per-file hash --
+    correctness there requires it; there is no cheaper safe signal."""
     root = Path(root)
     snap = load_corpus_snapshot(root)
-    try:
-        import subprocess
+    from ontograph.index_cache import cache_identity
 
-        commit = (
-            subprocess.run(
-                ["git", "-C", str(root), "rev-parse", "HEAD"],
-                capture_output=True, text=True, check=True, timeout=15,
-            ).stdout.strip()
-            or None
-        )
-    except Exception:
-        commit = None
-    signal = corpus_content_signal(root)
+    identity_info = cache_identity(root)
+    if identity_info["kind"] == "clean-git":
+        commit = identity_info["commit_sha"]
+        signal = f"git:{commit}"  # cheap stand-in: git's own content-addressing
+    else:
+        commit = _git_output(root, "rev-parse", "HEAD")
+        signal = corpus_content_signal(root)
     identity = "\x00".join(
         [commit or "none", snap.manifest_sha256, signal]
     ).encode("utf-8")
@@ -122,6 +127,22 @@ def corpus_snapshot(root: str | Path) -> "CorpusSnapshot":
         - _non_poem_json_count(root),
         snapshot_id=snapshot_id,
     )
+
+
+def _git_output(root: Path, *args: str) -> str | None:
+    """Local copy of index_cache's helper (kept import-cycle-free: corpus.py
+    is imported BY index_cache.py, so importing index_cache at module level
+    here would cycle). Used only on the dirty/non-git fallback path."""
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=False, capture_output=True, text=True, timeout=15,
+        )
+    except OSError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
 
 
 def _non_poem_json_count(root: Path) -> int:
