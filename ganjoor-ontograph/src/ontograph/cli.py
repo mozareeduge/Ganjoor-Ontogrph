@@ -1266,9 +1266,11 @@ def _inquire_create(ws, config, args) -> dict:
         # unsupported until W04B verifies them against the corpus)
         from ontograph.inquiry import InquiryCandidate as _IC
 
+        from ontograph.inquiry_parse import stable_candidate_id
+
         for form in parsed["persian_forms"]:
             candidates.append(_IC(
-                candidate_id=f"cand-{abs(hash(form)) % 10**12:012d}",
+                candidate_id=stable_candidate_id("lexical-anchor", form, args.actor),
                 kind="lexical-anchor", form=form,
                 proposer_type="human", proposer_id=args.actor,
                 rationale="supplied with the hunch via --persian-form",
@@ -1290,7 +1292,16 @@ def _inquire_create(ws, config, args) -> dict:
     persist_situation(ws, situation)
     persist_catalog(ws, catalog)
 
-    needs_vocab = parsed["needs_vocabulary"]
+    # G16 (L3.6): computed AFTER --file/--proposal candidates are merged --
+    # a hunch's raw text can look English-only while the caller already
+    # supplied real, attributed Persian forms via --file. The old version
+    # read only `parsed["needs_vocabulary"]` (from --hunch/--persian-form
+    # text alone) and ignored candidates entirely, so it could report
+    # needs_vocabulary=True (and a misleading next_command) even when
+    # nothing was actually missing.
+    needs_vocab = parsed["needs_vocabulary"] and not any(
+        c.kind == "lexical-anchor" and c.form for c in candidates
+    )
     next_command = (
         "ontograph inquire <study> --file <proposals.yaml> (supply attributed Persian candidates)"
         if needs_vocab
