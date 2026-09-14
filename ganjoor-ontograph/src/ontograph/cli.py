@@ -282,7 +282,19 @@ def _field_build(args) -> dict:
         + "\n",
         encoding="utf-8",
     )
-    result = {"study_id": args.study_id, "poem_count": len(poem_ids), "poem_ids": poem_ids}
+    # G18 (L3.7): the full poem_ids list was previously always inlined --
+    # ~1.2-1.6MB of JSON on this corpus for a routine call, expensive for
+    # an LLM-agent caller whose context is the actually scarce resource.
+    # Default to count + a stable hash; --include-poem-ids reproduces the
+    # old full-list behavior exactly for the rare caller that needs it.
+    import hashlib as _hashlib
+
+    scope_hash = "sh1-" + _hashlib.sha256(
+        "\x00".join(str(p) for p in poem_ids).encode("utf-8")
+    ).hexdigest()[:24]
+    result = {"study_id": args.study_id, "poem_count": len(poem_ids), "scope_hash": scope_hash}
+    if getattr(args, "include_poem_ids", False):
+        result["poem_ids"] = poem_ids
     if situation_id:
         result["situation_id"] = situation_id
     return result
@@ -1492,7 +1504,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     field = top.add_parser("field").add_subparsers(dest="field_verb", required=True)
     p = field.add_parser("build", parents=[with_corpus]); p.add_argument("study_id")
-    p.add_argument("--poet"); p.add_argument("--category"); p.set_defaults(func=_field_build)
+    p.add_argument("--poet"); p.add_argument("--category")
+    p.add_argument("--include-poem-ids", action="store_true")  # G18 (L3.7): opt-in, was always-on
+    p.set_defaults(func=_field_build)
 
     obj = top.add_parser("object").add_subparsers(dest="object_verb", required=True)
     p = obj.add_parser("add", parents=[common]); p.add_argument("study_id")
