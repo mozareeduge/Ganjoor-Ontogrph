@@ -16,7 +16,8 @@ the upstream fork below.
 Start here:
 - `ganjoor-ontograph/README.md` — what's in the package and how it's organized.
 - `ganjoor-ontograph/Ganjoor_Ontograph_Research_Apparatus_Project_Spec_v2.3.0.md` — the full spec.
-- `ganjoor-ontograph/implementation/IMPLEMENTATION_LEDGER.md` — build status (Phases 0-8; v0.1's automated ledger is complete, 134 tests passing, all 5 implementation gates green).
+- `ganjoor-ontograph/implementation/IMPLEMENTATION_LEDGER.md` — v0.1 build status (Phases 0-8; the v0.1 automated ledger and its "134 tests" figure describe that phase only, as of its own stop condition — see the current-status note near the top of that file).
+- **Current status (superseding the v0.1 figures above): `Plans.md` at the repo root.** Amendment 20 (Flat Assessment — no assessor type holds default authority) and its follow-up gap closures (G15-G22) are complete: 443 passed / 10 skipped / 1 xfailed. `Plans.md` is the live source of truth for what's built and what's next; `git log` on branch `ontograph/v0.1-build` has the full reasoning per change.
 - `ganjoor-ontograph/implementation/BUILD_PLAN.md` — phase rationale and the v0.1 stop condition.
 - `ganjoor-ontograph/implementation/HOW_TO_RUN.md` — how to resume the build loop, if there's more to build.
 - `.claude/skills/persian-poetry-ontograph/` — the researcher-facing skill (uses the finished `ontograph` CLI to run studies).

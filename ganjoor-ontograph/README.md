@@ -2,6 +2,8 @@
 
 Ganjoor Ontograph is a governed research apparatus for close and distant reading over the Ganjoor Persian poetry corpus. The researcher remains the source of semantic and occurrence decisions; the CLI records, validates, and renders those decisions.
 
+> **Amendment 20 (Flat Assessment)** changed what "occurrence assessment" means: no assessor type — human included — holds default, trace-erasing authority over another's. The quickstart below still works exactly as written (`assessed-full` is a supported, unchanged route), but it is no longer the only or the top-permission one. See `Ganjoor_Ontograph_Amendment_20_Flat_Assessment_v1.1.0.md` for the full model (`inventory`/`positioned-full`/`positioned-concordant` modes, `assessor add`, `policy declare`, `walk --as`) and the repo-root `Plans.md` for current build status (443 passed / 10 skipped / 1 xfailed).
+
 ## Governed quickstart
 
 The complete route is:

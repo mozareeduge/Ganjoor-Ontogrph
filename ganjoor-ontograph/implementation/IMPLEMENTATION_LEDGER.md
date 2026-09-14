@@ -1,5 +1,17 @@
 # Implementation ledger
 
+> **Current status, 2026-09-14 (this note, not the v0.1 stop condition below,
+> is authoritative for "what's built now"):** the v0.1 stop condition and its
+> "127/134 passed" figures describe this ledger's own scope as of Phase 8 and
+> are left untouched below, per this file's own rule against rewriting a
+> `done` row's history. Everything since — Phase 9 (corpus indexing/caching,
+> P9.x), and Amendment 20 (Flat Assessment — no assessor type holds default,
+> trace-erasing authority) plus its follow-up gap closures (G15-G22) — is
+> tracked in **`Plans.md` at the repo root**, the current source of truth.
+> Full suite as of Amendment 20 + Phase G: **443 passed / 10 skipped / 1
+> xfailed**. See `git log` on `ontograph/v0.1-build` for the reasoning behind
+> every change since this ledger's own stop condition.
+
 The single source of truth for "what's next." One `/ontograph-build`
 iteration = find the first row with `Status: todo` (rows are already in
 dependency order — do not skip ahead even if a later row looks easier),

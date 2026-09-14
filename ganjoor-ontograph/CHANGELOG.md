@@ -1,5 +1,46 @@
 ﻿# Changelog
 
+## 0.2.0 — Amendment 20 (Flat Assessment) + Phase G gap closures
+
+No assessor type — human included — holds default, trace-erasing
+authority over another's by default. A human's decision is recorded as
+one more object's position among others, never a verdict that
+overwrites another's. Full spec: `Ganjoor_Ontograph_Amendment_20_Flat_Assessment_v1.1.0.md`.
+
+- New data model: `OccurrencePosition` (stance grammar
+  occurs/does-not-occur/undecidable/out-of-scope, replacing the
+  accepted/rejected/ambiguous adjudication grammar for new writes),
+  `AssessorObject` registry, `ResolutionPolicy` (how a Position Set
+  composes — always an explicit, declared choice; no aggregate is ever
+  computed without one).
+- New CLI verbs: `assessor add|list`, `policy declare|list`; new
+  `census --mode inventory|positioned-full|positioned-concordant`
+  (alongside the unchanged `anchor`/`assessed-full` route); `walk`/`assess`
+  gain `--as <assessor-object-id>` to write real positions; `walk`
+  gains `--triage-order`; `field build` gains repeatable `--exclude-poet`.
+- Contested Position Sets (disagreeing assessors) automatically mint a
+  Trace candidate instead of being silently dropped or forced to a
+  synthetic average.
+- Claim Permission is now a machine-enforced ceiling
+  (`src/ontograph/claims.py`) keyed to disclosed composition and
+  contestation, never to who made the assessment — enforced on
+  `record add --type finding`.
+- New record types: `ResidueRecord`, `ReductionRecord`, `ClaimRecord`;
+  `FindingRecord`/`ClaimRecord` now require `unsupported_zones` and
+  `counter_evidence` (a real, non-optional schema change).
+- A legacy workspace that never ran the new migration still computes
+  correctly: `census.py` bridges the old per-hit ledger into the new
+  Position model live, at read time.
+- Six older technical findings closed alongside: the 780-second
+  uncached corpus-identity hash (now ~2s on a clean git checkout),
+  non-reproducible candidate IDs, a self-report bug in `inquire`'s
+  `needs_vocabulary` flag, an unbounded `field build --json` payload,
+  and `inquire --refresh` writing a stray SQLite file into the pinned
+  corpus root.
+- Full suite: 443 passed / 10 skipped / 1 xfailed (up from the v0.1
+  baseline of 336). See `Plans.md` and `git log` for the complete,
+  task-by-task record.
+
 ## Unreleased — U07 governed documentation
 
 - README, runbook, and migration guidance now expose the exact quickstart: **study new → inquire → field/refresh → review → walk → assessed-full operation → source return → Finding → release**.
