@@ -71,6 +71,7 @@ def run_walk(
     assessor: str,
     assessor_type: str,
     triage_order: str | None = None,
+    as_assessor: str | None = None,
 ) -> dict:
     from ontograph.cli import (
         CLIError,
@@ -79,6 +80,21 @@ def run_walk(
         _open_cached_index,
         _scope_allowed,
     )
+
+    # Gap G15 (Amendment 20 §8.4): when a real, registered assessor is
+    # named, resolve it BEFORE any write -- an unregistered --as refuses
+    # atomically, exactly like every other governed precondition in this
+    # engine (spec §7). Resolved once, reused for every position write
+    # below, so a typo can never silently create a walk's worth of
+    # positions under a mismatched apparatus.
+    resolved_assessor = None
+    if as_assessor:
+        from ontograph.assessors import resolve_assessor
+
+        try:
+            resolved_assessor = resolve_assessor(ws, as_assessor)
+        except ValueError as e:
+            raise CLIError(str(e))
 
     # -- gather the sample exactly as `calibrate` does (same deterministic
     #    sample: same hits/sample_size/seed -> same sample, same order) --
@@ -143,6 +159,31 @@ def run_walk(
             # coverage counts (spec §6.4/§6.5). Re-deciding a hit across
             # sessions is supersession (append-only chain).
             hit_rows.append((hit, decision))
+            # Gap G15 (Amendment 20 §3.1/§8.4): ADDITIVELY write a REAL
+            # OccurrencePosition too, when the caller named a registered
+            # assessor. This is the first CLI path that can ever produce a
+            # non-bridged position -- everything before this wrote only the
+            # legacy ledger, live-bridged by census.py's F06 machinery.
+            # Never replaces the ledger write above (every existing
+            # consumer of the old ledger keeps working unchanged).
+            #
+            # KNOWN DUALITY, not a bug: the old-ledger write above always
+            # uses `assessor`/`assessor_type` (default "human"/"human"),
+            # independent of `--as`. Unless the researcher passes a
+            # matching --assessor value, census will see BOTH this real
+            # position AND a separate `legacy:<type>:<assessor>` bridge
+            # entry for the same hit -- two distinct, honestly-recorded
+            # identities, not silent double-counting of one fact. A
+            # `--no-legacy-write` flag to make --as fully replace the old
+            # write is a reasonable future step, not built here.
+            if resolved_assessor is not None:
+                from ontograph.positions import STANCE_OF_DECISION, position_for
+
+                position_for(
+                    ws, hit.id, object_address, resolved_assessor.id,
+                    STANCE_OF_DECISION[decision],
+                    apparatus=resolved_assessor.apparatus,
+                )
             continue
 
         if token.startswith("n:"):

@@ -542,13 +542,31 @@ def _assess_hit(args, ws: Path) -> dict:
         )
         superseded = None
     append_hit_assessment(ws, row)
-    return {
+
+    # Gap G15 (Amendment 20 §3.1/§8.4): additive real position write,
+    # same as walk's --as (see walk.run_walk's matching comment).
+    result = {
         "object_address": args.object, "hit_id": args.hit_id,
         "decision": args.decision, "assessor_type": args.assessor_type,
         "assessor_id": args.assessor, "assessment_id": row.id,
         "superseded": superseded, "poem_id": hit.poem_id,
         "ledger": "corpus/hit-assessments.jsonl",
     }
+    as_assessor = getattr(args, "as_assessor", None)
+    if as_assessor:
+        from ontograph.assessors import resolve_assessor
+        from ontograph.positions import STANCE_OF_DECISION, position_for
+
+        try:
+            resolved = resolve_assessor(ws, as_assessor)
+        except ValueError as e:
+            raise CLIError(str(e))
+        position_for(
+            ws, args.hit_id, args.object, resolved.id,
+            STANCE_OF_DECISION[args.decision], apparatus=resolved.apparatus,
+        )
+        result["position_written_for"] = resolved.id
+    return result
 
 
 from ontograph.walk import run_walk
@@ -563,6 +581,7 @@ def _walk(args) -> dict:
         corpus_root=corpus_root, sample_size=args.sample, seed=args.seed,
         script_path=args.script, assessor=args.assessor,
         assessor_type=args.assessor_type, triage_order=args.triage_order,
+        as_assessor=args.as_assessor,
     )
     if situation_id:
         result["situation_id"] = situation_id
@@ -1517,6 +1536,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--rationale", default="")
     p.add_argument("--assessor-type", default="human", choices=["human", "agent", "rule"])
     p.add_argument("--assessor", default="human")
+    p.add_argument("--as", dest="as_assessor", default=None)  # Gap G15
     p.set_defaults(func=_assess)
 
     p = top.add_parser("calibrate", parents=[with_corpus]); p.add_argument("study_id")
@@ -1575,6 +1595,11 @@ def _build_parser() -> argparse.ArgumentParser:
     # Amendment 20 §4.9/F13: optional -- absent means unordered (current
     # behaviour, the deterministic calibration_sample order).
     p.add_argument("--triage-order", default=None, choices=["confident-first", "uncertain-first"])
+    # Gap G15 (Amendment 20 §8.4): the first CLI path that can write a REAL,
+    # registered position instead of only the legacy ledger (bridged live
+    # by census.py's F06 machinery). Optional and additive -- omitted, walk
+    # behaves exactly as before.
+    p.add_argument("--as", dest="as_assessor", default=None)
     p.set_defaults(func=_walk)
 
     p = top.add_parser("validate", parents=[with_corpus])
