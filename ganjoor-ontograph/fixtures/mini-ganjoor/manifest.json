@@ -1,0 +1,153 @@
+{
+  "SchemaVersion": 1,
+  "GeneratedAtUtc": "2026-08-27T00:00:00Z",
+  "PoetsCount": 4,
+  "PoemsCount": 27,
+  "IdIndexShardSize": 2000,
+  "UrlTemplates": {
+    "Poet": "poets/{poetSlug}/poet.json",
+    "Category": "poets/{poetSlug}/{catPath}/_cat.json",
+    "Poem": "poets/{poetSlug}/{catPath}/{poemSlug}.json"
+  },
+  "Poets": [
+    {
+      "Id": 9001,
+      "Nickname": "آزمایشی۱",
+      "FullUrl": "/sample1"
+    },
+    {
+      "Id": 9002,
+      "Nickname": "آزمایشی۲",
+      "FullUrl": "/sample2"
+    },
+    {
+      "Id": 9003,
+      "Nickname": "آزمایشی۳",
+      "FullUrl": "/sample3"
+    },
+    {
+      "Id": 9004,
+      "Nickname": "آزمایشی۴",
+      "FullUrl": "/sample4"
+    }
+  ],
+  "_fixture_ground_truth": {
+    "note": "Every number below was computed by an INDEPENDENT verification script (not by this generator's own bookkeeping), run against the actual written JSON files, before being pasted in here -- the same discipline used for the original v1 fixture. See EXTERNAL_REVIEW.md (Findings 1-3) for why the anchor/assessed/token-aware distinctions below exist; they did not exist in the pre-review fixture. The engine's own results must match these exactly on this fixture, or the fixture/engine disagreement is a bug to root-cause, not a fixture to quietly edit.",
+    "eligible_poems_total": 27,
+    "anchor_level": {
+      "note": "Raw lexical matches under NAIVE substring semantics -- deliberately includes the poem-9107 false positive, so a naive-substring engine and a token-aware engine produce DIFFERENT numbers here. See token_aware_level for the corrected numbers.",
+      "mirror_anchor_hits_total": 8,
+      "mirror_anchor_hits_by_form": {
+        "آینه": 7,
+        "آیینه": 1
+      },
+      "rust_anchor_hits_total": 4,
+      "poems_with_mirror": [
+        9101,
+        9102,
+        9103,
+        9104,
+        9105,
+        9106,
+        9107,
+        9201
+      ],
+      "poems_with_rust": [
+        9101,
+        9102,
+        9106,
+        9201
+      ],
+      "poem_scale_mirror_rust_coincidence": [
+        9101,
+        9102,
+        9106,
+        9201
+      ],
+      "couplet_scale_mirror_rust_coincidence": [
+        "9101 couplet 0",
+        "9106 couplet 0",
+        "9201 couplet 0"
+      ]
+    },
+    "token_aware_level": {
+      "note": "Same as anchor_level but with the poem-9107 substring false positive correctly excluded ('آینه‌بند' is a different token, not the word mirror, spec §58). A spec-compliant matcher must produce THESE numbers for lexical/anchor census (§27.1), not the anchor_level numbers above.",
+      "mirror_hits_total": 7,
+      "poems_with_mirror": [
+        9101,
+        9102,
+        9103,
+        9104,
+        9105,
+        9106,
+        9201
+      ],
+      "excluded_false_positive_poem": 9107
+    },
+    "assessed_level": {
+      "note": "Computed from token_aware_level Anchor Hits plus canonical-study-assessments.json. This is what spec §27.2/§28.1 require a typed co-incidence matrix, scale profile, and ablation to actually use -- never raw anchors.",
+      "accepted_mirror_poems": [
+        9101,
+        9102,
+        9103,
+        9104,
+        9201
+      ],
+      "ambiguous_mirror_poems": [
+        9105
+      ],
+      "rejected_mirror_poems": [
+        9106
+      ],
+      "accepted_rust_poems": [
+        9101,
+        9102,
+        9106,
+        9201
+      ],
+      "mirror_prevalence_poem_scale": "5/27",
+      "poem_scale_mirror_rust_coincidence": [
+        9101,
+        9102,
+        9201
+      ],
+      "couplet_scale_mirror_rust_coincidence": [
+        "9101 couplet 0 (mirror Right, rust Left, both accepted)",
+        "9201 couplet 0 (mirror and rust both in the Right hemistich, both accepted)"
+      ]
+    },
+    "divergence_note": "poem 9106 is the deliberate Finding-1 divergence case: it IS anchor-level and token-aware-level mirror-rust co-incidence, but is NOT assessed-level co-incidence, because its mirror hit is assessed rejected (figurative 'mirror of memory') while its rust hit is accepted (literal). An engine using raw/token-aware anchors instead of assessed occurrences for co-incidence will report 4 poems / 3 couplet-cases; a correct engine reports 3 poems / 2 couplet-cases.",
+    "couplet_scale_broad_only_case": "9102 (mirror in couplet 0, rust in couplet 2 -- same poem, never the same couplet)",
+    "ablation_remove_sample1": {
+      "note": "sample1 = poems 9101-9107. Both anchor-level and assessed-level retention are given because they differ (another place a cheating engine diverges from a correct one).",
+      "anchor_poem_scale_retention": "1/4 poems remain (9201 only)",
+      "assessed_poem_scale_retention": "1/3 poems remain (9201 only)",
+      "anchor_couplet_scale_retention": "1/3 couplet-cases remain (9201 only)",
+      "assessed_couplet_scale_retention": "1/2 couplet-cases remain (9201 only)"
+    },
+    "ambiguous_occurrence_assessment_case": "poem 9105 (figurative 'mirror of the heart' -- also the one place HEART leaks outside sample4, see heart_object below)",
+    "rejected_occurrence_assessment_case": "poem 9106 (figurative 'mirror of memory' -- the Finding-1 divergence case)",
+    "anchor_normalization_case": "poem 9104 (آیینه spelling variant, no rust present)",
+    "substring_false_positive_case": "poem 9107 ('آینه‌بند', a ZWNJ-joined compound sharing the 'آینه' substring but not the word mirror -- Finding 3 of the external review)",
+    "zero_incidence_control_poet": "sample3 (all 5 poems, 0 mirror, 0 rust, 0 heart)",
+    "heart_object": {
+      "note": "Second, larger fixture object (Finding 2 of the external review) so estimated-mode incidence can be tested at a genuine <100% sampling fraction. sample4 (poems 9401-9410) contributes exactly 4 hits per poem, 40 total; poem 9105 incidentally contributes 1 more from the mirror/heart figurative line, for a field-wide total of 41. Estimation tests (P2.4/P7.5) should sample from the full 41-hit population, not just the clean 40-hit sample4 subset, since a real study field would not artificially exclude the incidental hit either.",
+      "sample4_hits": 40,
+      "sample4_poems": [
+        9401,
+        9402,
+        9403,
+        9404,
+        9405,
+        9406,
+        9407,
+        9408,
+        9409,
+        9410
+      ],
+      "incidental_hit_outside_sample4": "poem 9105 (1 hit)",
+      "field_total_hits": 41,
+      "field_total_poems_with_heart": 11
+    }
+  }
+}

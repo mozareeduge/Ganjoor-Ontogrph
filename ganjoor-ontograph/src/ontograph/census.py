@@ -1,0 +1,832 @@
+"""Occurrence assessment and occurrence-policy orchestration.
+
+Spec §8.1 (object-incidence modes: anchor/assessed-full/assessed-rule/
+estimated), §8.1.1 (v2.3.0: ambiguous-hit denominator rule -- a unit with
+only ambiguous hits stays in the eligible-unit denominator, scored 0, and
+is reported separately rather than silently folded into presence or
+absence), §9 (Close Calibration), §27.2 (estimator default: stratified
+proportion + Wilson score interval, spec Appendix C.3 as amended in
+v2.3.0).
+
+`OccurrencePolicy` records here are what every later co-incidence/scale/
+ablation calculation must read from -- never raw Anchor Hits directly
+(spec §27.2, §28.1; this is the exact distinction EXTERNAL_REVIEW.md
+Finding 1 found untested in the original fixture).
+"""
+from __future__ import annotations
+
+import json
+import math
+import random
+import sys
+from dataclasses import dataclass, field as _dc_field
+
+from ontograph.anchors import AnchorHit
+from ontograph.normalize import tokenize
+
+
+# --- P2.1: Close Calibration sampler (spec §9) ---
+
+def calibration_sample(
+    hits: list[AnchorHit], sample_size: int, seed: int, strata_key=None
+) -> list[AnchorHit]:
+    """Seeded sample over Anchor Hits (spec §9: "random or stratified
+    cases ... Top-ranked search results alone are not an adequate
+    calibration set"). Reproducible: the same `hits`/`sample_size`/`seed`
+    always returns the same sample, in the same order.
+
+    `strata_key`, when given, groups hits by `strata_key(hit)` and draws
+    (as evenly as the remainder allows) from each stratum rather than one
+    unstratified draw -- still fully deterministic given `seed`."""
+    n = min(sample_size, len(hits))
+    if strata_key is None:
+        rng = random.Random(seed)
+        return rng.sample(hits, n)
+
+    strata: dict = {}
+    for h in hits:
+        strata.setdefault(strata_key(h), []).append(h)
+    keys = sorted(strata.keys(), key=str)
+    per_stratum = max(1, n // len(keys)) if keys else 0
+    rng = random.Random(seed)
+    sample: list[AnchorHit] = []
+    for k in keys:
+        bucket = strata[k]
+        take = min(per_stratum, len(bucket))
+        sample.extend(rng.sample(bucket, take))
+    # top up to n from whatever remains, deterministically
+    remaining = [h for h in hits if h not in sample]
+    if len(sample) < n and remaining:
+        sample.extend(rng.sample(remaining, min(n - len(sample), len(remaining))))
+    return sample[:n]
+
+
+def open_context_ladder(hit: AnchorHit, poem_path) -> dict:
+    """Spec §35: match -> verse -> couplet -> section -> poem. Returns the
+    immediate context around one Anchor Hit for a calibration reviewer to
+    read before deciding accepted/rejected/ambiguous -- never just the
+    matched span alone (spec §9's rejection of "top search result" review)."""
+    poem = json.loads(poem_path.read_text(encoding="utf-8"))
+    couplet_verses = [
+        v for v in poem["Verses"] if v.get("CoupletIndex") == hit.couplet_index
+    ]
+    return {
+        "match": hit.lexical_anchor,
+        "verse": hit.original_text,
+        "couplet": couplet_verses,
+        "poem_title": poem.get("Title"),
+        "poem_id": poem["Id"],
+    }
+
+
+# --- P2.2: OccurrenceAssessment + OccurrencePolicy ---
+# --- T05: per-hit identity + supersession ---
+#
+# The v0.1 `OccurrenceAssessment` below (anchor_hit_poem_id) is the
+# poem-keyed legacy shape; the execution spec §6.4 defines the per-hit
+# record. T05 adds the per-hit dataclass + supersession machinery
+# WITHOUT touching the legacy shape (compatibility preserved until a
+# migration row changes it). The two classes are deliberately distinct:
+# a test that confused them could not catch a poem-keyed regression.
+
+import uuid as _uuid  # noqa: E402
+
+
+@dataclass(frozen=True)
+class OccurrenceAssessment:  # legacy poem-keyed shape (v0.1, kept)
+    anchor_hit_poem_id: int
+    object_address: str
+    decision: str  # accepted | rejected | ambiguous
+    rationale: str = ""
+    assessor: str = "human"
+
+
+@dataclass(frozen=True)
+class HitOccurrenceAssessment:
+    """Per-hit assessment (spec §6.4, T05). Ledger is append-only; the
+    active decision for a hit is the latest valid row for
+    (object_address_id, anchor_hit_id). Reassessment rows name their
+    predecessor via `supersedes`."""
+
+    id: str
+    anchor_hit_id: str
+    object_address_id: str
+    decision: str  # accepted | rejected | ambiguous
+    rationale: str = ""
+    assessor_type: str = "human"  # human | agent | rule
+    assessor_id: str = ""
+    assessment_policy_version: str = "1.0.0"
+    supersedes: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.decision not in ("accepted", "rejected", "ambiguous"):
+            raise ValueError(f"invalid decision: {self.decision!r}")
+        # 'legacy-poem-decision' is the read-only marker T03's migration
+        # writes for pre-T05 poem-keyed rows: valid in the ledger, but it
+        # provides zero assessed-full coverage (T06) and can never be
+        # created by the assess/walk routes.
+        if self.assessor_type not in ("human", "agent", "rule", "legacy-poem-decision"):
+            raise ValueError(f"invalid assessor_type: {self.assessor_type!r}")
+
+
+def new_hit_assessment_id() -> str:
+    """Record IDs for historical actions use type prefix + UUID4 hex
+    (spec §6.2): `oa-` here."""
+    return "oa-" + _uuid.uuid4().hex
+
+
+def supersede(
+    predecessor: HitOccurrenceAssessment,
+    decision: str,
+    rationale: str = "",
+    assessor_type: str = "human",
+    assessor_id: str = "",
+) -> HitOccurrenceAssessment:
+    """Create the replacement row for one hit. A superseded row may never
+    be superseded again (it is history, not a live decision) -- refusing
+    here keeps every ledger row resolvable to exactly one active chain.
+
+    Amendment 20 §3.3 (non-erasure): a position may only supersede a prior
+    position FROM THE SAME ASSESSOR. Cross-assessor supersession is a hard
+    refusal, not a warning -- this is what makes "no object's contribution
+    erases another's" a property of the data, not a policy someone has to
+    remember. Legacy rows with no recorded assessor_id (pre-Amendment-20
+    ledger entries, assessor_id == "") are exempt: there is nothing to
+    compare identity against, so the guard cannot apply retroactively."""
+    if getattr(predecessor, "_superseded", False):
+        raise ValueError(
+            f"row {predecessor.id} has already been superseded; "
+            "supersede the ACTIVE row instead (append-only ledger)"
+        )
+    if predecessor.assessor_id and predecessor.assessor_id != assessor_id:
+        raise ValueError(
+            f"cannot supersede row {predecessor.id}: it was positioned by "
+            f"assessor {predecessor.assessor_id!r}, not {assessor_id!r} "
+            "(Amendment 20 §3.3 -- supersession is self-scoped; a different "
+            "assessor's contribution is never overwritten, only added as a "
+            "new position)"
+        )
+    # frozen dataclass: mark the predecessor so a second supersede attempt
+    # in the same session is refused (a superseded row is history, not a
+    # live decision; persistent ledgers enforce the same rule at read time
+    # via active_decision)
+    object.__setattr__(predecessor, "_superseded", True)
+    return HitOccurrenceAssessment(
+        id=new_hit_assessment_id(),
+        anchor_hit_id=predecessor.anchor_hit_id,
+        object_address_id=predecessor.object_address_id,
+        decision=decision,
+        rationale=rationale,
+        assessor_type=assessor_type,
+        assessor_id=assessor_id,
+        supersedes=predecessor.id,
+    )
+
+
+def active_decision(
+    ledger: list[HitOccurrenceAssessment], anchor_hit_id: str
+) -> HitOccurrenceAssessment | None:
+    """Latest valid row for `anchor_hit_id`, or None when the hit has no
+    assessment. Validity: a row is shadowed when a later row supersedes
+    it (directly or transitively)."""
+    rows = [r for r in ledger if r.anchor_hit_id == anchor_hit_id]
+    if not rows:
+        return None
+    superseded_ids = {r.supersedes for r in rows if r.supersedes}
+    live = [r for r in rows if r.id not in superseded_ids]
+    # the active row is the last live one in append order
+    return live[-1] if live else None
+
+
+# --- Amendment 20 F06: live bridge from the legacy per-hit ledger into
+# the Position model, so a workspace that has never run an explicit
+# migrate_to_positions() (F04) still computes correctly through the new
+# machinery. F04 is the explicit, receipted, PERMANENT upgrade; this is a
+# read-time-only, nothing-persisted convenience that uses the identical
+# mapping (positions.STANCE_OF_DECISION, the same "legacy:<type>:<id>"
+# assessor naming) so the two paths can never disagree about a given hit.
+
+def ensure_legacy_assessors_registered(ws, ledger: list["HitOccurrenceAssessment"] | None = None) -> None:
+    """Lazily register the synthetic AssessorObjects a bridged read needs.
+    Safe to call repeatedly: skips ids already registered (by this
+    function, by a prior bridge call, or by an explicit F04 migration --
+    all three produce the exact same id for the same (type, id) pair, so
+    they can never collide, only agree)."""
+    from ontograph.assessors import AssessorObject, read_assessors, register_assessor
+
+    ledger = load_hit_assessments(ws) if ledger is None else ledger
+    real = [r for r in ledger if r.assessor_type != "legacy-poem-decision"]
+    if not real:
+        return
+    existing_ids = {a.id for a in read_assessors(ws)}
+    distinct = sorted({(r.assessor_type, r.assessor_id or "unknown") for r in real})
+    for assessor_type, assessor_id in distinct:
+        legacy_id = f"legacy:{assessor_type}:{assessor_id}"
+        if legacy_id in existing_ids:
+            continue
+        register_assessor(ws, AssessorObject(
+            id=legacy_id, label=f"legacy {assessor_type} ({assessor_id})",
+            assessor_type=assessor_type,
+            apparatus="bridged live from hit-assessments.jsonl (no explicit migration run yet)",
+            independence_class="legacy-unknown", registered_by="census-bridge",
+        ))
+
+
+def bridged_positions_for_object(
+    ws, object_address_id: str, ledger=None, already_real_pairs: set[tuple] | None = None,
+) -> list:
+    """Synthesize `OccurrencePosition` rows, IN MEMORY ONLY (never
+    written), for (hit, legacy-assessor) pairs that have no REAL position
+    yet. Once THAT SAME legacy assessor has a real position on a hit
+    (from an F04 migration, or the legacy ledger being replayed twice),
+    it is never also bridged -- two positions for the same fact would be
+    redundant. Scoped per-(hit, assessor), not per-hit alone: a hit with
+    a NEW real position from a DIFFERENT assessor still gets its original
+    legacy assessor's position bridged in alongside it -- otherwise adding
+    one genuinely new assessor's position would silently make an
+    already-two-assessor hit look single-positioned, hiding the exact
+    corroboration a researcher just went to the trouble of adding."""
+    from ontograph.positions import STANCE_OF_DECISION, OccurrencePosition
+
+    ledger = load_hit_assessments(ws) if ledger is None else ledger
+    already_real_pairs = already_real_pairs or set()
+    by_hit: dict[str, list[HitOccurrenceAssessment]] = {}
+    for r in ledger:
+        if r.object_address_id != object_address_id:
+            continue
+        by_hit.setdefault(r.anchor_hit_id, []).append(r)
+    out = []
+    for hit_id, rows in by_hit.items():
+        active = active_decision(rows, hit_id)
+        if active is None or active.assessor_type == "legacy-poem-decision":
+            continue
+        legacy_id = f"legacy:{active.assessor_type}:{active.assessor_id or 'unknown'}"
+        if (hit_id, legacy_id) in already_real_pairs:
+            continue
+        out.append(OccurrencePosition(
+            id=f"bridge-{active.id}", anchor_hit_id=hit_id,
+            object_address_id=object_address_id,
+            assessor_object_id=legacy_id, stance=STANCE_OF_DECISION[active.decision],
+            rationale=active.rationale, apparatus="bridged live from hit-assessments.jsonl",
+        ))
+    return out
+
+
+def full_position_set(ws, object_address_id: str) -> list:
+    """Real positions plus legacy-bridged ones for (hit, legacy-assessor)
+    pairs with no real position yet. Every coverage/Standing/resolution
+    computation for an object should read through THIS, never either
+    ledger directly."""
+    from ontograph.positions import read_positions
+
+    real = [p for p in read_positions(ws) if p.object_address_id == object_address_id]
+    real_pairs = {(p.anchor_hit_id, p.assessor_object_id) for p in real}
+    ensure_legacy_assessors_registered(ws)
+    bridged = bridged_positions_for_object(ws, object_address_id, already_real_pairs=real_pairs)
+    return real + bridged
+
+
+def hit_decisions(
+    hits: list[AnchorHit], ledger: list[HitOccurrenceAssessment]
+) -> dict[str, str]:
+    """Per-hit active decisions for aggregation (T05): hit id -> decision.
+    A hit with no assessment is NOT in the result -- callers treat absence
+    as unassessed (never silently accepted)."""
+    out: dict[str, str] = {}
+    for h in hits:
+        active = active_decision(ledger, h.id)
+        if active is not None:
+            out[h.id] = active.decision
+    return out
+
+
+# --- T06: mode names and completeness enforcement (spec §6.5) ---
+
+CANONICAL_MODES = ("anchor", "assessed-full", "assessed-rule", "estimated")
+
+
+class IncompleteAssessmentError(ValueError):
+    """assessed-full refused because eligible hits lack active assessments.
+    Carries coverage counts and the legal alternative modes/flows."""
+
+    def __init__(self, coverage: tuple[int, int], legal_alternatives: list[str]) -> None:
+        assessed, eligible = coverage
+        self.coverage = coverage
+        self.legal_alternatives = legal_alternatives
+        super().__init__(
+            f"assessed-full requires 100% eligible-hit coverage; "
+            f"coverage is {assessed}/{eligible}. Legal alternatives: "
+            f"{', '.join(legal_alternatives)}"
+        )
+
+
+def resolve_mode_alias(mode: str) -> tuple[str, bool]:
+    """`assessed` is an alias for `assessed-full` through v0.2 and warns
+    on stderr -- it never means partial review (spec §6.5)."""
+    if mode == "assessed":
+        print(
+            "WARNING: --mode assessed is an alias for assessed-full "
+            "(partial review is never reported as assessed-full)",
+            file=sys.stderr,
+        )
+        return "assessed-full", True
+    return mode, False
+
+
+def assessed_full_coverage(
+    hits: list[AnchorHit], ledger: list[HitOccurrenceAssessment]
+) -> tuple[int, int]:
+    """Coverage = active assessed eligible hits / eligible hits (spec
+    §6.5). Only per-hit assessments count; poem-keyed legacy rows
+    (assessor_type 'legacy-poem-decision') provide zero coverage --
+    fanning them across hits is the forbidden shortcut."""
+    eligible = len(hits)
+    if eligible == 0:
+        return (0, 0)
+    assessed = sum(
+        1
+        for r in (active_decision(ledger, h.id) for h in hits)
+        if r is not None and r.assessor_type != "legacy-poem-decision"
+    )
+    return (assessed, eligible)
+
+
+def enforce_mode_completeness(
+    mode: str,
+    hits: list[AnchorHit],
+    ledger: list[HitOccurrenceAssessment],
+) -> None:
+    """Refuse assessed-full below 100% eligible-hit coverage, before any
+    computation, with coverage counts and legal alternatives (spec §6.5,
+    §7: unsupported input fails before computation; silent zero is
+    forbidden)."""
+    mode, _ = resolve_mode_alias(mode)
+    if mode != "assessed-full":
+        return
+    coverage = assessed_full_coverage(hits, ledger)
+    if coverage[0] < coverage[1]:
+        raise IncompleteAssessmentError(
+            coverage,
+            legal_alternatives=["walk", "assessed-rule", "estimated", "anchor"],
+        )
+
+
+# --- Amendment 20 §4.2/§8.2 (F06): the flat-assessment mode gate.
+# `enforce_mode_completeness` above is UNCHANGED and stays wired to the
+# old `assessed-full` CLI path for now (F07 rewires the CLI surface).
+# This is the new gate, over the Position model, for `inventory`,
+# `positioned-full`, and `positioned-concordant`.
+
+POSITIONED_MODES = ("inventory", "positioned-full", "positioned-concordant")
+
+
+class NoResolutionPolicyError(ValueError):
+    """Refused: no ResolutionPolicy declared for this object, so no
+    aggregate figure may be computed (Amendment 20 §3.4/§4.3) -- the
+    engine never silently picks a composition."""
+
+    def __init__(self, object_address_id: str) -> None:
+        self.object_address_id = object_address_id
+        super().__init__(
+            f"no ResolutionPolicy declared for {object_address_id!r} -- "
+            "the engine will not compose positions without an explicit, "
+            "disclosed choice (Amendment 20 §3.4/§4.3). Declare one: "
+            "'ontograph policy declare --kind concordance' (unanimity "
+            "among however many assessors positioned each hit), "
+            "'--kind named-assessor --assessor <id>' (one assessor's "
+            "positions only, e.g. to reproduce a solo human census), or "
+            "'--kind weighted --weights <json> --justification <text>' "
+            "(a declared numeric composition). Or use --mode inventory, "
+            "always computable, never an aggregate."
+        )
+
+
+class IncompletePositioningError(ValueError):
+    """positioned-full/positioned-concordant refused: coverage or
+    Standing requirements are not met. Carries the full composition and
+    Standing distribution so the caller can report exactly what is
+    missing, never just a bare count (Amendment 20 §2.4/§4.1/§4.2)."""
+
+    def __init__(self, mode: str, coverage: dict, standing: dict) -> None:
+        self.mode = mode
+        self.coverage = coverage
+        self.standing = standing
+        requirement = (
+            "100% eligible-hit positioning" if mode == "positioned-full"
+            else "every eligible hit to be concordant (>=2 independent "
+                 "assessors agreeing; zero contested, single-position, or "
+                 "corroborated-weak hits)"
+        )
+        alternatives = ["inventory", "estimated"]
+        if mode == "positioned-full":
+            alternatives.append("positioned-concordant (harder, not easier)")
+        super().__init__(
+            f"{mode} requires {requirement}; positioned "
+            f"{coverage['positioned_hits']}/{coverage['eligible_hits']}, "
+            f"standing={standing}. Legal alternatives: {', '.join(alternatives)}"
+        )
+
+
+def enforce_mode_requirements(mode: str, hits: list[AnchorHit], ws, object_address_id: str) -> None:
+    """Amendment 20 §4.2/§8.2's gate for the flat-assessment modes.
+    `mode` must already be the resolved (non-alias) name. No-op for
+    `anchor`/`inventory` (always computable) and `estimated` (its own
+    five conditions, §4.6, are enforced where the estimator runs)."""
+    if mode in ("anchor", "inventory", "estimated"):
+        return
+    if mode not in POSITIONED_MODES:
+        raise ValueError(f"unknown mode: {mode!r}")
+
+    from ontograph.positions import position_coverage, standing_distribution
+    from ontograph.resolution import active_policy_for
+
+    eligible_hit_ids = [h.id for h in hits]
+    positions = full_position_set(ws, object_address_id)
+    coverage = position_coverage(ws, eligible_hit_ids, object_address_id, positions=positions)
+    standing = standing_distribution(ws, eligible_hit_ids, object_address_id, positions=positions)
+
+    if active_policy_for(ws, object_address_id) is None:
+        raise NoResolutionPolicyError(object_address_id)
+
+    if mode == "positioned-full":
+        if coverage["unpositioned_hits"] > 0:
+            raise IncompletePositioningError(mode, coverage, standing)
+        return
+
+    non_concordant = (
+        standing["unpositioned"] + standing["single_position"]
+        + standing["corroborated_weak"] + standing["contested"]
+    )
+    if non_concordant > 0:
+        raise IncompletePositioningError(mode, coverage, standing)
+
+
+# --- T06: per-hit assessment ledger (append-only, spec §6.4/§6.5) ---
+# The per-hit HitOccurrenceAssessment rows live in their own workspace
+# ledger (`corpus/hit-assessments.jsonl`), separate from the legacy
+# poem-keyed occurrence ledger that `assess`/`walk` still write for
+# v0.1 compatibility. Coverage (assessed_full_coverage) reads ONLY this
+# per-hit ledger -- fanning poem-keyed rows across hits is the forbidden
+# shortcut (execution-spec lock T04-T06: "remove poem-keyed compatibility
+# calculation from the per-hit path").
+
+HIT_ASSESSMENTS_REL = "corpus/hit-assessments.jsonl"
+
+
+def hit_assessments_path(ws) -> "Path":
+    from pathlib import Path as _Path
+
+    return _Path(ws) / "corpus" / "hit-assessments.jsonl"
+
+
+def load_hit_assessments(ws) -> list[HitOccurrenceAssessment]:
+    """Read the study's per-hit ledger into HitOccurrenceAssessment rows.
+    Malformed JSON lines fail loudly (no silent skip -- spec §7)."""
+    path = hit_assessments_path(ws)
+    if not path.exists():
+        return []
+    rows: list[HitOccurrenceAssessment] = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        entry = json.loads(line)
+        rows.append(HitOccurrenceAssessment(
+            id=entry["id"],
+            anchor_hit_id=entry["anchor_hit_id"],
+            object_address_id=entry["object_address_id"],
+            decision=entry["decision"],
+            rationale=entry.get("rationale", ""),
+            assessor_type=entry.get("assessor_type", "human"),
+            assessor_id=entry.get("assessor_id", ""),
+            assessment_policy_version=entry.get("assessment_policy_version", "1.0.0"),
+            supersedes=entry.get("supersedes"),
+        ))
+    return rows
+
+
+def append_hit_assessment(ws, row: HitOccurrenceAssessment) -> None:
+    """Append one per-hit assessment row. Append-only: nothing here ever
+    rewrites or deletes a line (supersession adds a new row instead)."""
+    from dataclasses import asdict as _asdict
+
+    path = hit_assessments_path(ws)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(_asdict(row), ensure_ascii=False) + "\n")
+
+
+def hit_poem_sets(
+    hits: list[AnchorHit], ledger: list[HitOccurrenceAssessment]
+) -> tuple[set[int], set[int]]:
+    """Poem-level aggregation of per-hit active decisions (spec §8.1.1):
+    a poem is ACCEPTED-present when any of its eligible hits has an active
+    accepted decision; AMBIGUOUS-ONLY when no accepted hit and at least one
+    ambiguous hit. Unassessed hits cannot occur downstream of
+    enforce_mode_completeness (T06 refuses below 100% coverage), so a poem
+    whose decisions are all 'rejected' is simply absent from both sets.
+    This replaces the poem-keyed compatibility calculation (T04-T06 lock).
+    """
+    decisions = hit_decisions(hits, ledger)
+    accepted: set[int] = set()
+    ambiguous_only: set[int] = set()
+    for h in hits:
+        d = decisions.get(h.id)
+        if d == "accepted":
+            accepted.add(h.poem_id)
+        elif d == "ambiguous":
+            ambiguous_only.add(h.poem_id)
+    # a poem with any accepted hit leaves the ambiguous-only bucket
+    return accepted, ambiguous_only - accepted
+
+
+def mint_contested_traces(ws, hits: list[AnchorHit], object_address_id: str, positions=None) -> list[str]:
+    """Amendment 20 §2.4: every hit whose Position Set is `contested`
+    automatically becomes a Trace candidate -- carrying the hit, every
+    position with its apparatus/conditions/rationale, and (via the
+    stored anchor_hit_id/object_address, resolvable through `source
+    show`) a source return. Contestation is not an error to fix; this is
+    the cheapest research material the apparatus can produce.
+
+    Idempotent: a hit already covered by an auto-minted trace is never
+    minted twice, even across repeated census runs on the same object."""
+    from ontograph.positions import contested_trace_candidates
+    from ontograph.records import TraceRecord, read_records, write_record
+
+    eligible_hit_ids = [h.id for h in hits]
+    candidates = contested_trace_candidates(ws, eligible_hit_ids, object_address_id, positions=positions)
+    if not candidates:
+        return []
+
+    existing = read_records(ws, "trace")
+    already_covered = {
+        enc.get("anchor_hit_id")
+        for t in existing
+        for enc in t.initiating_encounters
+        if enc.get("source") == "amendment20-contested-auto-mint"
+        and enc.get("object_address") == object_address_id
+    }
+
+    minted_ids: list[str] = []
+    for cand in candidates:
+        hit_id = cand["anchor_hit_id"]
+        if hit_id in already_covered:
+            continue
+        descriptions = [
+            {
+                "assessor_object_id": p["assessor_object_id"],
+                "stance": p["stance"],
+                "rationale": p.get("rationale", ""),
+                "apparatus": p.get("apparatus", ""),
+            }
+            for p in cand["positions"]
+        ]
+        trace_id = f"trace-contested-{hit_id}-{object_address_id}"
+        write_record(ws, "trace", TraceRecord(
+            id=trace_id,
+            initiating_encounters=[{
+                "anchor_hit_id": hit_id, "object_address": object_address_id,
+                "source": "amendment20-contested-auto-mint",
+            }],
+            what_appeared=(
+                f"positions on hit {hit_id} for object {object_address_id!r} "
+                f"disagree ({len(descriptions)} assessors, differing stances)"
+            ),
+            candidate_descriptions=descriptions,
+            next_discriminating_action=(
+                "close-read this hit's source context (ontograph source show); "
+                "either add a corroborating position from a new independence "
+                "class, or record why the disagreement itself is the finding "
+                "(Amendment 20 §2.4)"
+            ),
+            status="active",
+            created_by="census-contested-auto-mint",
+        ))
+        minted_ids.append(trace_id)
+    return minted_ids
+
+
+def resolved_poem_sets(ws, hits: list[AnchorHit], object_address_id: str, policy) -> tuple[set[int], set[int]]:
+    """Amendment 20 §4.2/F07: the flat-assessment analogue of
+    `hit_poem_sets` above -- a poem is `occurs`-present when any of its
+    eligible hits resolves to `occurs` under `policy`; `undecidable-only`
+    when no `occurs` hit and at least one hit resolves to `undecidable`
+    (including hits `resolve()` excludes as `None`, which under
+    `concordance`'s default `contested_handling` means "excluded and
+    reported" -- treated the same as undecidable-only here, i.e. neither
+    occurring nor silently absent)."""
+    from ontograph.positions import active_positions
+    from ontograph.resolution import resolve
+
+    positions = full_position_set(ws, object_address_id)
+    occurs: set[int] = set()
+    undecidable_only: set[int] = set()
+    for h in hits:
+        active = active_positions(positions, h.id, object_address_id)
+        stance = resolve(ws, active, policy)
+        if stance == "occurs":
+            occurs.add(h.poem_id)
+        elif stance in ("undecidable", None):
+            undecidable_only.add(h.poem_id)
+    return occurs, undecidable_only - occurs
+
+
+def apply_assessments(
+    hits: list[AnchorHit], assessments: dict[int, str]
+) -> list[tuple[AnchorHit, str]]:
+    """Pairs each hit with its decision from `assessments` (poem_id ->
+    decision). A hit with no entry in `assessments` is NOT silently
+    treated as accepted -- it is returned with decision `None`, and
+    callers (§8.1's mode-specific functions below) must decide what an
+    unassessed hit means for their mode rather than this function
+    guessing."""
+    return [(h, assessments.get(h.poem_id)) for h in hits]
+
+
+def accepted_poem_ids(hits: list[AnchorHit], assessments: dict[int, str]) -> set[int]:
+    return {h.poem_id for h in hits if assessments.get(h.poem_id) == "accepted"}
+
+
+def ambiguous_only_poem_ids(hits: list[AnchorHit], assessments: dict[int, str]) -> set[int]:
+    """Poems whose hits for this object are ALL ambiguous (none accepted)
+    -- the set that spec §8.1.1 says must stay in the eligible-unit
+    denominator, scored 0, and be reported separately rather than folded
+    into either presence or absence."""
+    by_poem: dict[int, list[str]] = {}
+    for h in hits:
+        by_poem.setdefault(h.poem_id, []).append(assessments.get(h.poem_id))
+    return {
+        poem_id for poem_id, decisions in by_poem.items()
+        if decisions and all(d == "ambiguous" for d in decisions)
+    }
+
+
+# --- P2.3: ambiguous-hit denominator rule (spec §8.1.1, v2.3.0) ---
+
+@dataclass(frozen=True)
+class Prevalence:
+    numerator: int
+    denominator: int
+    ambiguous_only_count: int
+
+    @property
+    def value(self) -> float:
+        return self.numerator / self.denominator if self.denominator else 0.0
+
+
+def assessed_full_prevalence(
+    eligible_poem_ids: set[int], hits: list[AnchorHit], assessments: dict[int, str]
+) -> Prevalence:
+    """spec §8.1.1: a unit whose only hits are ambiguous stays in the
+    denominator (never dropped), scored 0 in the numerator, and its count
+    is reported separately -- never silently folded into either presence
+    or absence."""
+    accepted = accepted_poem_ids(hits, assessments) & eligible_poem_ids
+    ambiguous_only = ambiguous_only_poem_ids(hits, assessments) & eligible_poem_ids
+    return Prevalence(
+        numerator=len(accepted),
+        denominator=len(eligible_poem_ids),
+        ambiguous_only_count=len(ambiguous_only),
+    )
+
+
+# --- P7.5: validated-rule route (spec §70's second of three defensible
+# scalability routes: "a deterministic rule is calibrated against
+# reviewed material and its limits are recorded") ---
+
+RULE_VERSION = "figurative-context-stoplist-v1"
+
+# Calibrated against the mirror object's 7 reviewed fixture hits (P7.5):
+# every mirror hit whose verse names an abstract/mental noun right next
+# to the literal object turned out, on human review, to be figurative
+# ("mirror of my heart", "mirror in memory") rather than a literal
+# mirror. This is a real, named limitation, not a hidden one: the rule
+# only inspects verse-local lexical co-occurrence, is binary
+# (accepted/rejected, with no "ambiguous" bucket of its own), and is
+# calibrated on this one object over this one fixture -- it is not shown
+# to generalize to other objects or the real corpus.
+_FIGURATIVE_CONTEXT_STOPLIST = frozenset({"دل", "خاطره"})  # heart, memory
+
+
+@dataclass(frozen=True)
+class RuleDecision:
+    poem_id: int
+    decision: str  # accepted | rejected -- no ambiguous bucket, see module note above
+    rule_version: str
+    matched_stoplist_terms: frozenset
+
+
+def apply_occurrence_rule(hits: list[AnchorHit]) -> list[RuleDecision]:
+    """spec §70 route 2: a deterministic, versioned rule over each hit's
+    own verse (`AnchorHit.normalized_text` already carries it -- no
+    re-read of the source poem is needed). Rejects a hit whose verse
+    contains any `_FIGURATIVE_CONTEXT_STOPLIST` term, accepts otherwise."""
+    decisions = []
+    for h in hits:
+        verse_tokens = {t[0] for t in tokenize(h.normalized_text)}
+        matched = _FIGURATIVE_CONTEXT_STOPLIST & verse_tokens
+        decisions.append(
+            RuleDecision(
+                poem_id=h.poem_id, decision="rejected" if matched else "accepted",
+                rule_version=RULE_VERSION, matched_stoplist_terms=frozenset(matched),
+            )
+        )
+    return decisions
+
+
+@dataclass(frozen=True)
+class RuleValidationReport:
+    rule_version: str
+    agreement_count: int
+    total_reviewed: int
+    disagreement_poem_ids: frozenset
+
+
+def validate_rule_against_reviewed_material(
+    decisions: list[RuleDecision], human_assessments: dict[int, str]
+) -> RuleValidationReport:
+    """spec §70: calibrates the rule's decisions against already-reviewed
+    (human-assessed) material and records agreement -- never presented
+    as validated without this check having actually run. Ambiguous human
+    decisions are collapsed to "rejected" for this binary rule's
+    comparison, since the rule has no third bucket -- a stated limit of
+    the comparison, not a silent one."""
+    agreement = 0
+    disagreements = []
+    reviewed = 0
+    for d in decisions:
+        human = human_assessments.get(d.poem_id)
+        if human is None:
+            continue
+        reviewed += 1
+        human_binary = "accepted" if human == "accepted" else "rejected"
+        if human_binary == d.decision:
+            agreement += 1
+        else:
+            disagreements.append(d.poem_id)
+    return RuleValidationReport(
+        rule_version=RULE_VERSION, agreement_count=agreement,
+        total_reviewed=reviewed, disagreement_poem_ids=frozenset(disagreements),
+    )
+
+
+# --- P2.4: default estimator (spec §27.2, Appendix C.3 v2.3.0) ---
+
+@dataclass(frozen=True)
+class EstimatedIncidence:
+    point_estimate: float
+    wilson_lo: float
+    wilson_hi: float
+    sample_size: int
+    population_size: int
+    fpc_applied: bool
+
+
+def wilson_score_interval(successes: int, n: int, z: float = 1.96) -> tuple[float, float]:
+    """Standard Wilson score interval for a binomial proportion (no
+    external stats dependency -- spec Appendix C.3 names this as the
+    provisional default, not a hard requirement to use a particular
+    library)."""
+    if n == 0:
+        return (0.0, 0.0)
+    p = successes / n
+    denom = 1 + z ** 2 / n
+    centre = p + z ** 2 / (2 * n)
+    margin = z * math.sqrt((p * (1 - p) + z ** 2 / (4 * n)) / n)
+    lo = (centre - margin) / denom
+    hi = (centre + margin) / denom
+    return (max(0.0, lo), min(1.0, hi))
+
+
+def estimate_incidence(
+    population_poem_ids: list[int],
+    sample_poem_ids: list[int],
+    accepted_in_sample: set[int],
+    seed: int,
+) -> EstimatedIncidence:
+    """Stratified-proportion estimator + Wilson interval (spec §27.2). The
+    "stratified" part is the caller's responsibility (pass a
+    `sample_poem_ids` already drawn per-stratum, e.g. via
+    `calibration_sample(..., strata_key=...)`); this function computes the
+    proportion and interval from whatever sample it is given, and applies
+    a finite-population correction to the interval width once the sample
+    is >10% of the population (spec Appendix C.3)."""
+    n = len(sample_poem_ids)
+    N = len(population_poem_ids)
+    successes = len(accepted_in_sample)
+    point = successes / n if n else 0.0
+    lo, hi = wilson_score_interval(successes, n)
+
+    fpc_applied = False
+    if N > 0 and n / N > 0.10:
+        fpc = math.sqrt((N - n) / (N - 1)) if N > 1 else 1.0
+        half_width_lo = point - lo
+        half_width_hi = hi - point
+        lo = max(0.0, point - half_width_lo * fpc)
+        hi = min(1.0, point + half_width_hi * fpc)
+        fpc_applied = True
+
+    return EstimatedIncidence(
+        point_estimate=point, wilson_lo=lo, wilson_hi=hi,
+        sample_size=n, population_size=N, fpc_applied=fpc_applied,
+    )

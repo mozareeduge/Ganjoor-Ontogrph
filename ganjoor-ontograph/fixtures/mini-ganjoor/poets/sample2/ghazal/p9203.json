@@ -1,0 +1,44 @@
+{
+  "Id": 9203,
+  "CatId": 2,
+  "Title": "غزل آزمایشی ۲-۳",
+  "FullTitle": "غزل آزمایشی ۲-۳",
+  "FullUrl": "/fixture/9203",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "Unrelated filler poem (control unit for the denominator).",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "کوه بلند و رود روان / در دامنه چادر زدیم",
+      "HtmlText": "<div class='b'>کوه بلند و رود روان / در دامنه چادر زدیم</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 1
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "کوه بلند و رود روان",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "در دامنه چادر زدیم",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    }
+  ]
+}

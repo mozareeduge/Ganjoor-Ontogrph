@@ -1,0 +1,373 @@
+"""Corpus-root-keyed SQLite index cache (ledger row P9.2).
+
+Every CLI verb used to do a full `scan_corpus()` + re-parse/re-tokenize
+from scratch on each invocation (~60–90s on the real corpus before any
+query work; ledger row P9.2). This module makes the already-proven
+`corpus.build_index()` (Phase 1, proven against the real corpus in P8.1)
+actually reusable: the derived SQLite index is stored on disk under a
+deterministic path derived from the corpus root plus a *content signal*,
+so a second invocation with the same corpus content reopens it in
+seconds instead of rebuilding.
+
+Cache-key discipline (the one genuinely novel engineering risk of
+Phase 9 — plan risk #4: "a cache that serves stale or wrong-scoped
+results would silently corrupt every downstream number"):
+
+- The key is a SHA-256 over a composite content signal: the resolved
+  corpus root path, the manifest.json SHA-256, the poem file count, and
+  a cheap per-shard (per-poet-directory) fingerprint. **Never mtime
+  alone**: the shard fingerprint is a hash over (relative path, size,
+  mtime_ns) of every file in the shard, so a content edit that keeps
+  size and mtime, a copy that changes mtime but not content, and a
+  renamed shard all resolve correctly.
+- Before serving a cached index, the *current* signal is recomputed and
+  compared against the signal stored in the cache's meta file at build
+  time. Any mismatch (changed manifest, added/removed/edited poem, a
+  different corpus root entirely) misses the cache and triggers a full
+  rebuild. Stale results are never served.
+
+The cached index itself is opened read-only: like `corpus.py`, this
+module treats upstream JSON as the source of truth and the derived
+index as rebuildable infrastructure (spec §57) — nothing ever writes to
+an existing cache entry.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import subprocess
+import tempfile
+from pathlib import Path
+
+from ontograph.anchors import AnchorHit, LexicalAnchor
+from ontograph.corpus import build_index
+from ontograph.field import PoemRecord
+from ontograph.normalize import normalize
+
+CACHE_SCHEMA_VERSION = 1
+
+# Env override so a test (or a user) can point the cache somewhere
+# ephemeral; default lives under the user's own cache dir, shared across
+# studies and workspaces — the corpus content is the key, not the study.
+_ENV_CACHE_DIR = "ONTOGRAPH_INDEX_CACHE_DIR"
+
+
+def default_cache_dir() -> Path:
+    env = os.environ.get(_ENV_CACHE_DIR)
+    if env:
+        return Path(env)
+    return Path.home() / ".cache" / "ontograph" / "index-cache"
+def _git_output(root: Path, *args: str) -> str | None:
+    """Return git output for ``root``, or ``None`` when it is not a repo."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), *args],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _indexed_inputs_are_tracked(root: Path) -> bool:
+    """Return whether every JSON input the index reads is git-tracked.
+
+    Answered entirely by git (no corpus walk): every file under poets/ must
+    be tracked, i.e. git must report neither ignored nor other (untracked)
+    files beneath it. An untracked non-JSON file also forces the conservative
+    signal — clean status alone must not launder an input tree git doesn't
+    fully account for.
+    """
+    ignored = _git_output(root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--", "poets")
+    if ignored is None or ignored != "":
+        return False
+    others = _git_output(root, "ls-files", "-z", "--others", "--exclude-standard", "--", "poets")
+    if others is None or others != "":
+        return False
+    tracked = _git_output(root, "ls-files", "-z", "--", "poets")
+    return tracked is not None and bool(tracked)
+
+def cache_identity(root: str | Path) -> dict:
+    """Return the safe cache identity for a corpus root.
+
+    A clean git checkout can use its immutable commit plus manifest hash,
+    avoiding a full corpus walk on warm opens. Dirty and non-git roots retain
+    the conservative composite signal, which includes path and size as well
+    as mtimes and is therefore never mtime-only.
+    """
+    root = Path(root)
+    manifest_sha256 = hashlib.sha256((root / "manifest.json").read_bytes()).hexdigest()
+    commit_sha = _git_output(root, "rev-parse", "HEAD")
+    status = _git_output(root, "status", "--porcelain")
+    if commit_sha is not None and status == "" and _indexed_inputs_are_tracked(root):
+        return {
+            "kind": "clean-git",
+            "commit_sha": commit_sha,
+            "manifest_sha256": manifest_sha256,
+            "cache_schema_version": CACHE_SCHEMA_VERSION,
+        }
+    return {
+        "kind": "full-signal",
+        "signal": content_signal(root),
+        "cache_schema_version": CACHE_SCHEMA_VERSION,
+    }
+
+
+def _shard_fingerprint(root: Path) -> str:
+    """Hash every corpus file's relative path and bytes.
+
+    This is deliberately the conservative dirty/non-git route: it catches a
+    content edit even if size and mtime are restored, so cache validity never
+    depends on mtime alone.
+    """
+    digest = hashlib.sha256()
+    for poet_dir in sorted(root.glob("poets/*")):
+        if not poet_dir.is_dir():
+            continue
+        for path in sorted(poet_dir.rglob("*")):
+            if not path.is_file():
+                continue
+            relative = str(path.relative_to(root)).replace("\\", "/")
+            digest.update(relative.encode("utf-8"))
+            digest.update(b"\0")
+            with path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+    return digest.hexdigest()
+
+def content_signal(root: str | Path) -> dict:
+    """The composite content signal the cache key is derived from."""
+    root = Path(root)
+    manifest_bytes = (root / "manifest.json").read_bytes()
+    poem_files = [
+        p for p in root.glob("poets/*/**/*.json")
+        if p.name not in ("poet.json", "_cat.json")
+    ]
+    return {
+        "root": str(root.resolve()),
+        "manifest_sha256": hashlib.sha256(manifest_bytes).hexdigest(),
+        "poem_file_count": len(poem_files),
+        "shard_fingerprint": _shard_fingerprint(root),
+    }
+
+
+def cache_key(root: str | Path, identity: dict | None = None) -> str:
+    if identity is None:
+        identity = cache_identity(root)
+    blob = json.dumps(identity, sort_keys=True, ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(blob).hexdigest()[:32]
+
+
+def _cache_paths(root: str | Path, cache_dir: Path, identity: dict | None = None) -> tuple[Path, Path]:
+    key = cache_key(root, identity)
+    base = f"index-{key}-v{CACHE_SCHEMA_VERSION}"
+    return cache_dir / f"{base}.sqlite", cache_dir / f"{base}.meta.json"
+
+
+def _open_read_only(db_path: Path):
+    import sqlite3
+    return sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+
+
+def get_or_build_index(
+    root: str | Path, cache_dir: str | Path | None = None
+) -> tuple[object, dict, bool]:
+    """Return (connection, build_manifest, cache_hit) for `root`'s derived
+    index, building it once via `corpus.build_index()` if no valid cache
+    entry exists. The connection is opened READ-ONLY on the cached file —
+    callers query it, never mutate it.
+
+    `cache_hit` is False exactly when the index was (re)built this call.
+    Raises FileNotFoundError (via `content_signal`) when `root` has no
+    manifest.json — a missing corpus is an error, never an empty cache."""
+    root = Path(root)
+    cache_dir = Path(cache_dir) if cache_dir is not None else default_cache_dir()
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    identity = cache_identity(root)
+    db_path, meta_path = _cache_paths(root, cache_dir, identity)
+
+    if db_path.exists() and meta_path.exists():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            meta = None
+        if (
+            isinstance(meta, dict)
+            and meta.get("cache_schema_version") == CACHE_SCHEMA_VERSION
+            and meta.get("cache_identity") == identity
+            and meta.get("cache_root") == str(root.resolve())
+        ):
+            return _open_read_only(db_path), meta["build_manifest"], True
+
+    # Miss (no entry, corrupt meta, or content changed) → full rebuild.
+
+    fd, tmp_name = tempfile.mkstemp(prefix="ontograph-index-", suffix=".sqlite", dir=str(cache_dir))
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        conn, build_manifest = build_index(root, db_path=str(tmp_path))
+        conn.close()
+        meta = {
+            "cache_schema_version": CACHE_SCHEMA_VERSION,
+            "cache_identity": identity,
+            "cache_root": str(root.resolve()),
+            "build_manifest": build_manifest,
+        }
+        os.replace(tmp_path, db_path)
+        meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    finally:
+        if tmp_path.exists():
+            tmp_path.unlink()
+    return _open_read_only(db_path), build_manifest, False
+
+
+# --- index-backed records and census (ledger row P9.3's substrate) ---
+#
+# Both functions reproduce `field.scan_corpus`'s and `anchors.census`'s
+# exact result ORDER, not just their content: `calibration_sample` is
+# seed-position-sensitive, so a reordered hit list would silently change
+# which hits a fixed-seed calibrate sample draws — fixture numbers must
+# not change at all when verbs are rewired onto the cache.
+
+def records_from_index(conn) -> list[PoemRecord]:
+    """PoemRecord list equivalent to `scan_corpus(root)`'s, served from the
+    cached index (a cheap SELECT, not a re-scan of 130k+ JSON files).
+    Ordered by source path exactly as `scan_corpus`'s sorted glob is, and
+    carrying the same (poem_id, poet_slug, poet_id, cat_id, path)."""
+    rows = conn.execute(
+        "SELECT id, poet_id, cat_id, source_path FROM poems"
+    ).fetchall()
+    records = [
+        PoemRecord(
+            poem_id=poem_id,
+            poet_slug=Path(source_path).parts[Path(source_path).parts.index("poets") + 1],
+            poet_id=poet_id,
+            cat_id=cat_id,
+            path=Path(source_path),
+        )
+        for poem_id, poet_id, cat_id, source_path in rows
+    ]
+    records.sort(key=lambda r: r.path)  # scan_corpus's own ordering
+    return records
+
+
+def census_from_index(
+    conn, records: list[PoemRecord], anchors: list[LexicalAnchor],
+    corpus_snapshot_id: str | None = None,
+) -> list[AnchorHit]:
+    """Token-level anchor census (spec §27.1) served from the cached
+    index's token_offsets table instead of re-reading/re-tokenizing every
+    poem JSON. Matching semantics are identical to `anchors.census`:
+    approved anchors only, anchor forms normalized before comparison,
+    token-exact (never substring — the 9107 `آینه‌بند` guard must not
+    regress). Hit ORDER is identical to `anchors.census` too: records in
+    `scan_corpus` order; within a poem, verse order then token_index
+    order; within a token, `forms_by_object` insertion order.
+
+    T04: hits carry verse_order (from the index's own vorder column) and
+    corpus_snapshot_id (derived from the records' root when omitted), so
+    hit IDs are identical to the scan path's."""
+    if corpus_snapshot_id is None and records:
+        from ontograph.corpus import corpus_snapshot as _cs
+
+        corpus_snapshot_id = _cs(records[0].path.parents[3]).snapshot_id
+    approved = [a for a in anchors if a.status == "approved"]
+    # T02: mode-aware anchors, validated up front, identical dispatch to
+    # anchors.census (exact by token IN; phrase by ordered n-gram over a
+    # verse's tokens, reconstructed from token_index ordering).
+    from ontograph.anchors import resolve_auto_mode, validate_anchor_form
+
+    exact_by_object: dict[str, set[str]] = {}
+    phrase_by_object: dict[str, list[list[str]]] = {}
+    for a in approved:
+        mode = a.match_mode
+        if mode == "auto":
+            mode = resolve_auto_mode(a.form)
+        normalized_form = validate_anchor_form(a.form, mode)
+        if mode == "phrase":
+            phrase_by_object.setdefault(a.object_address, []).append(normalized_form.split())
+        else:
+            exact_by_object.setdefault(a.object_address, set()).add(normalized_form)
+
+    all_forms = sorted(
+        {f for forms in exact_by_object.values() for f in forms}
+        | {tok for lists in phrase_by_object.values() for toks in lists for tok in toks}
+    )
+    hits_by_poem: dict[int, list[AnchorHit]] = {}
+    if all_forms:
+        placeholders = ",".join("?" for _ in all_forms)
+        rows = conn.execute(
+            "SELECT t.poem_id, t.vorder, t.token_index, t.token_text, "
+            "t.start_offset, t.end_offset, v.couplet_index, v.position, "
+            "v.text, n.normalized_text "
+            "FROM token_offsets t "
+            "JOIN verses v ON v.poem_id = t.poem_id AND v.vorder = t.vorder "
+            "JOIN normalized_verses n ON n.poem_id = t.poem_id AND n.vorder = t.vorder "
+            f"WHERE t.token_text IN ({placeholders}) "
+            "ORDER BY t.poem_id, t.vorder, t.token_index",
+            all_forms,
+        ).fetchall()
+        # Group rows per (poem_id, vorder) so phrase n-grams can be found
+        # on the same ordered token stream the scan path tokenizes.
+        rows_by_verse: dict[tuple[int, int], list[tuple]] = {}
+        for row in rows:
+            rows_by_verse.setdefault((row[0], row[1]), []).append(row)
+
+        def _emit(hit: AnchorHit) -> None:
+            hits_by_poem.setdefault(hit.poem_id, []).append(hit)
+
+        for (poem_id, vorder), vrows in rows_by_verse.items():
+            _couplet_index = vrows[0][6]
+            _position = vrows[0][7]
+            _text = vrows[0][8]
+            _ntext = vrows[0][9]
+            # exact pass (per-token, scan-identical ordering)
+            for row in vrows:
+                token_text, start, end = row[3], row[4], row[5]
+                for object_address, forms in exact_by_object.items():
+                    if token_text in forms:
+                        _emit(AnchorHit(
+                            object_address=object_address,
+                            lexical_anchor=token_text,
+                            poem_id=poem_id,
+                            couplet_index=_couplet_index,
+                            position=_position,
+                            original_text=_text,
+                            normalized_text=_ntext,
+                            token_start=start,
+                            token_end=end,
+                            verse_order=vorder,
+                            corpus_snapshot_id=corpus_snapshot_id,
+                        ))
+            # T02 phrase pass: ordered n-grams within this verse. Note a
+            # subtlety: rows here only contain tokens matching some form
+            # of some anchor; a phrase whose middle token matches no
+            # anchor would be invisible. That is impossible in this
+            # query because every phrase token IS in all_forms.
+            toks = [(r[3], r[4], r[5]) for r in vrows]  # already token_index-ordered
+            for object_address, phrase_lists in phrase_by_object.items():
+                for phrase_tokens in phrase_lists:
+                    n = len(phrase_tokens)
+                    for i in range(len(toks) - n + 1):
+                        if [toks[i + j][0] for j in range(n)] == phrase_tokens:
+                            _emit(AnchorHit(
+                                object_address=object_address,
+                                lexical_anchor=" ".join(phrase_tokens),
+                                poem_id=poem_id,
+                                couplet_index=_couplet_index,
+                                position=_position,
+                                original_text=_text,
+                                normalized_text=_ntext,
+                                token_start=toks[i][1],
+                                token_end=toks[i + n - 1][2],
+                                verse_order=vorder,
+                                corpus_snapshot_id=corpus_snapshot_id,
+                            ))
+
+    hits: list[AnchorHit] = []
+    for record in records:  # scan_corpus ordering, per poem
+        hits.extend(hits_by_poem.get(record.poem_id, []))
+    return hits

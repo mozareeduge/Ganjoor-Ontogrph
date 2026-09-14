@@ -1,0 +1,33 @@
+{
+  "note": "Canonical OccurrenceAssessment decisions for the mirror-rust study fixture. See CANONICAL_ASSESSMENTS in generate_fixture.py for the source of truth and rationale.",
+  "assessments": {
+    "mirror": {
+      "9101": "accepted",
+      "9102": "accepted",
+      "9103": "accepted",
+      "9104": "accepted",
+      "9105": "ambiguous",
+      "9106": "rejected",
+      "9201": "accepted"
+    },
+    "rust": {
+      "9101": "accepted",
+      "9102": "accepted",
+      "9106": "accepted",
+      "9201": "accepted"
+    }
+  },
+  "rationale": {
+    "mirror:9101": "literal reflective surface in the scene",
+    "mirror:9102": "literal reflective surface in the scene",
+    "mirror:9103": "literal reflective surface in the scene",
+    "mirror:9104": "literal reflective surface (spelling-variant anchor)",
+    "mirror:9105": "unclear whether literal or figurative ('mirror of the heart')",
+    "mirror:9106": "figurative ('mirror of memory') -- not a literal object",
+    "mirror:9201": "literal reflective surface in the scene",
+    "rust:9101": "literal material rust in the scene",
+    "rust:9102": "literal material rust in the scene",
+    "rust:9106": "literal material rust ('rust settled on the old frame')",
+    "rust:9201": "literal material rust in the scene"
+  }
+}

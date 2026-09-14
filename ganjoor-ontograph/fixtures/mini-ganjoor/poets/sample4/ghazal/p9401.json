@@ -1,0 +1,58 @@
+{
+  "Id": 9401,
+  "CatId": 4,
+  "Title": "غزل آزمایشی ۴-1",
+  "FullTitle": "غزل آزمایشی ۴-1",
+  "FullUrl": "/fixture/9401",
+  "RhymeLetters": "ها",
+  "SourceName": "mini-ganjoor-fixture",
+  "SourceUrlSlug": "fixture",
+  "PoemSummary": "HEART-frequency fixture poem (Finding 2 of the external review) — not thematically connected to the mirror/rust study. Exactly one HEART token per verse, 4 verses, so this poem contributes exactly 4 HEART hits.",
+  "Metre": {
+    "Id": 1,
+    "Rhythm": "فعولن فعولن فعولن فعل (fixture metre)"
+  },
+  "Sections": [
+    {
+      "Index": 0,
+      "Number": 1,
+      "SectionType": "WholePoem",
+      "VerseType": "First",
+      "RhymeLetters": "ها",
+      "PlainText": "دل من آرام گرفت امشب / دل تو کجا آرام گیرد\nدل دیگر بار بازگشت / دل دیگر بار برفت",
+      "HtmlText": "<div class='b'>دل من آرام گرفت امشب / دل تو کجا آرام گیرد\nدل دیگر بار بازگشت / دل دیگر بار برفت</div>",
+      "PoemFormat": "Ghazal",
+      "CoupletsCount": 2
+    }
+  ],
+  "Verses": [
+    {
+      "VOrder": 1,
+      "Position": "Right",
+      "Text": "دل من آرام گرفت امشب",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 2,
+      "Position": "Left",
+      "Text": "دل تو کجا آرام گیرد",
+      "CoupletIndex": 0,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 3,
+      "Position": "Right",
+      "Text": "دل دیگر بار بازگشت",
+      "CoupletIndex": 1,
+      "SectionIndex1": 0
+    },
+    {
+      "VOrder": 4,
+      "Position": "Left",
+      "Text": "دل دیگر بار برفت",
+      "CoupletIndex": 1,
+      "SectionIndex1": 0
+    }
+  ]
+}

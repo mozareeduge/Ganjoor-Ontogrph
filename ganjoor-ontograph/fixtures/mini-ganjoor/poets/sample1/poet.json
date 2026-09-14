@@ -1,0 +1,10 @@
+{
+  "Id": 9001,
+  "Name": "شاعر آزمایشی یک",
+  "Nickname": "آزمایشی۱",
+  "Description": "Fabricated fixture poet, not a real historical figure.",
+  "BirthYearInLHijri": 705,
+  "DeathYearInLHijri": 780,
+  "ValidBirthDate": true,
+  "ValidDeathDate": true
+}
