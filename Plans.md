@@ -48,32 +48,23 @@ stop — that is a regression, not a side effect.
 | F13 | `walk --triage-order {confident-first,uncertain-first}` CLI flag, wired into `run_walk()`'s sample ordering right after `calibration_sample()` draws it. **Default is `None` (unordered), not `uncertain-first`** as this row originally said — deliberate: an omitted flag must reproduce the exact pre-F13 deterministic sample order byte-for-byte, not silently start reordering existing scripted-replay fixtures the moment this task landed. `positions.queue_by_weight()` itself already landed in F03 (tested, passing) — this task is the CLI/`run_walk` wiring only. Amendment refs: §4.9, §8.3, §8.4. `[tdd:required]` | With `--triage-order uncertain-first`, the lowest-weight non-human position's hit is visited first (verified by scripting only enough responses for the first-visited hit and checking which `anchor_hit_id` received the decision); `confident-first` reverses it; a hit with no reported weight sorts last under either order; omitting the flag reproduces the exact old fixture arithmetic (7/7 accepted, unchanged) — verified: `tests/test_f13_triage_order.py`, 3/3 passing on first run; full suite 418 passed / 10 skipped / 1 xfailed | F01, F03 | cc:完了 |
 | F14 | Final regression pass: confirm every pre-existing fixture arithmetic value is byte-identical post-migration, and confirm the new discriminating fixture actually discriminates. **In practice this was verified continuously, not just at the end** — the full suite ran after every single F01–F13 task (never just once at F14), and every regression this session actually found (the two in F10's commit) was caught and fixed the moment it was introduced, not accumulated to here. `[tdd:skip:verification-not-implementation]` | Full suite: **418 passed / 10 skipped / 1 xfailed** (336 baseline + 82 new tests across S00/F02–F13, zero net regressions at every step). Named canaries re-verified explicitly by test name in one run: `test_mirror_assessment_counts_5_accepted_1_ambiguous_1_rejected`, `test_assessed_full_prevalence_denominator_is_27_not_26` (mirror 5/27); `test_anchor_level_retention_is_1_of_4_poems_1_of_3_couplets`, `test_assessed_level_retention_is_1_of_3_poems_1_of_2_couplets` (ablation 1/3, 1/2); `test_cli.py`'s assessed-mode `poem_scale == [9101, 9102, 9201]`; `test_anchor_and_assessed_coincidence_diverge_on_poem_9106` — all 44 tests across the 7 canary-carrying files pass unchanged. The divergence fixture (built in F05, reused as this task's own discriminating fixture) yields three genuinely different numbers (4/2/1) under `concordance`/`named-assessor(A)`/`named-assessor(B)` — confirmed non-coincidental after an earlier symmetric-fixture attempt was caught producing only 2 distinct values and rebuilt asymmetric. | F12, F13 | cc:完了 |
 
-**Deferred, tracked but out of scope for this Plans.md** (per Amendment §10's
-own "Not in Phase F" list — do not fold into the tasks above): the
-780-second uncached `corpus_content_signal` walk (L3.1), the scope-exclusion
-CLI grammar / V201 (L3.4 — this is the gap that originally blocked excluding
-Ferdowsi's Shahnameh from a field), non-reproducible `abs(hash())` candidate
-IDs (L3.5), the `needs_vocabulary` self-report bug (L3.6), the unbounded
-`field build --json` payload (L3.7), and `inquire --refresh` writing a SQLite
-file into the pinned corpus root (L3.8). Raise a follow-up Plans.md for these
-once F01–F14 land — several (esp. L3.1, L3.4) are worth doing before real
-research resumes, but they are independent of flat assessment and would only
-add noise to this dependency chain.
+## Phase G — closing the two tracked gaps (2026-09-14)
 
-**Real gap discovered during F06, not yet a ticketed task — raise as F15 (or
-fold into F13) before calling this ladder truly complete:** nothing in F01–F13
-redirects `walk`/`assess` to WRITE real `OccurrencePosition` rows going
-forward. They still only write the old `hit-assessments.jsonl` ledger; F06's
-bridge (`census.full_position_set()`) makes that old ledger computable through
-the new gate, but a fresh walk today still cannot register a real
-`AssessorObject` and position hits directly under it — every position for a
-live study is a synthetic `legacy:*` bridge entry, never a first-class one.
-Needed: a `--as <assessor-object-id>` flag on `walk`/`assess` (per the
-Amendment's own §8.4 vision) that writes through `positions.position_for()`
-in addition to (or eventually instead of) the old ledger. Without this, only
-`migrate_to_positions()` and direct Python calls to `position_for()` can ever
-create a real, non-bridged position — the CLI researcher-facing surface for
-actually *using* flat assessment day-to-day does not exist yet.
+Both gaps named in F01–F14's own footer, now real tasks. G15 first (highest
+value, makes flat assessment actually usable day-to-day); G16–G21 are the six
+technical findings from the original critique, independent of each other and
+of G15 — order chosen cheapest/most-isolated first.
+
+| Task | 内容 | DoD | Depends | Status |
+|---|---|---|---|---|
+| G15 | `--as <assessor-object-id>` on `walk` and `assess`, resolved against the real `AssessorObject` registry (F02). When given, writes a REAL `OccurrencePosition` via `positions.position_for()` **in addition to** the existing old-ledger write (additive, not a replacement — every existing test that depends on the old ledger's exact behavior keeps working). Omitted `--as` behaves exactly as before (old ledger only, bridged live by F06 as always). Amendment refs: §8.4. `[tdd:required]` | `walk --as <registered-id>` produces a real (non-`legacy:*`) `OccurrencePosition` visible to `census --mode positioned-full` without needing the F06 bridge; an unregistered `--as` id refuses with a clear error naming it; omitting `--as` reproduces old behavior byte-for-byte | F13 | cc:TODO |
+| G16 | L3.6: `needs_vocabulary` computed before `--file`/`--proposal` candidates are merged in `_inquire_create` — move the computation after merge | `inquire --hunch "<english>" --file proposal.json` (proposal supplies real Persian forms) no longer reports `needs_vocabulary: true` | - | cc:TODO |
+| G17 | L3.5: non-reproducible `abs(hash())` candidate IDs in `_inquire_create`/`inquiry_parse.py` — replace with `"cand-" + sha256(f"{kind}\x00{form}\x00{proposer}").hexdigest()[:24]`, matching the house style (`ah1-`/`cs1-`) already used elsewhere | The same `(kind, form, proposer)` produces the same candidate id across two separate Python processes (was previously random per `PYTHONHASHSEED`) | - | cc:TODO |
+| G18 | L3.7: `field build --json` inlines the full `poem_ids` list (1.6MB on this corpus) unconditionally — default to `poem_count` + a stable `scope_hash`; add `--include-poem-ids` for the rare caller that needs the full list | `field build` without the new flag returns no `poem_ids` key and stays under a few KB; `--include-poem-ids` reproduces the old full-list behavior exactly | - | cc:TODO |
+| G19 | L3.8: `inquire --refresh` writes `ontograph-support-idx.sqlite` directly into the pinned corpus root, bypassing `index_cache` and risking a second full cold build — route it through `get_or_build_index()` like every other verb | `inquire --refresh` no longer creates any file under the corpus root; a warm cache is reused (verified via `cache_hit=True` / timing, not just absence of the file) | - | cc:TODO |
+| G20 | L3.1: `corpus_snapshot()`/`corpus_content_signal()` has no cache — measured 780s cold on this corpus. Give `corpus_snapshot()` the same clean-git fast path `index_cache.cache_identity()` already has; persist `snapshot_id` into the index cache's meta sidecar so `census_from_index()`/`anchors.py`'s implicit-derivation branches become an O(1) read instead of a full re-walk. Amendment refs: L3.1's own fix list. `[tdd:required]` | A second `corpus_snapshot()` call (or any verb that was implicitly deriving it, e.g. `companions`/`ablate`) on an unchanged clean-git corpus resolves in low single-digit seconds, not 780s — measured, not asserted | G19 | cc:TODO |
+| G21 | L3.4/V201: scope-exclusion CLI grammar. `field.py`'s `ScopeSpec` already implements `union`/`intersect`/`difference`, tested (F06 era). Minimum viable CLI surface: repeatable `--poet` (union across calls) + new `--exclude-poet` (difference) on `field build`, without building the full `all|none|poet:x|union(...)|...` parser from execution-spec §8 (a stretch goal, not required for this to be useful) | `field build --poet a --poet b` unions two poets into one field; `field build --exclude-poet ferdousi` (no `--poet`) builds all-poets-except-Ferdowsi in one governed call — the exact case that forced an ungoverned workaround in the original Esfandyar study | - | cc:TODO |
+| G22 | Final wrap: full regression run, `CLAUDE.md`/`README.md`/`IMPLEMENTATION_LEDGER.md` status headers updated to the real current state (L3.11 — currently still say "134 tests, v0.1 complete" against an actual 418+ test / Amendment-20-era codebase), version bump. `[tdd:skip:docs-and-verification]` | Full suite green with the exact new total named in the closing commit; the three docs no longer contradict `git log`/the actual test count | G15, G16, G17, G18, G19, G20, G21 | cc:TODO |
 
 ---
 
