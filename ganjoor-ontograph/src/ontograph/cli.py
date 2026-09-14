@@ -1133,9 +1133,8 @@ def _inquire_refresh(ws, config, args) -> dict:
     """W04B: verify an existing catalog's lexical candidates against the
     pinned corpus and append a SUPERSEDING catalog with real support
     statuses + located evidence. The original is never rewritten."""
-    import sqlite3
-
-    from ontograph.corpus import corpus_snapshot, build_index
+    from ontograph.corpus import corpus_snapshot
+    from ontograph.index_cache import get_or_build_index
     from ontograph.inquiry import (
         CandidateEvidenceRef, InquiryCandidate, InquiryCatalog,
         persist_catalog, read_catalogs,
@@ -1157,10 +1156,13 @@ def _inquire_refresh(ws, config, args) -> dict:
             "stale receipts are never silently refreshed against a different corpus"
         )
 
-    db = Path(root) / "ontograph-support-idx.sqlite"
-    if not db.exists():
-        build_index(root, db)
-    conn = sqlite3.connect(db)
+    # G19 (L3.8): previously wrote `ontograph-support-idx.sqlite` directly
+    # into the pinned corpus root, bypassing index_cache entirely -- both
+    # against the read-only-source-layer spirit (spec §56/§57) AND risking
+    # a second full cold index build (measured ~7,500s on the real corpus)
+    # a warm cache already had. Routes through the same cache every other
+    # verb uses.
+    conn, _manifest, _cache_hit = get_or_build_index(root)
     try:
         from ontograph.inquiry_support import compute_support
 
